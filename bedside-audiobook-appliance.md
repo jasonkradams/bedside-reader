@@ -15,7 +15,7 @@ _Go + Datastar + Pi Zero 2 W + Display HAT Mini + MAX98357A + CE32A-4 (mono)_
 | Display      | **Pimoroni Display HAT Mini** (2.0" IPS SPI + 4 onboard buttons + RGB LED) | Stacks directly on the Pi header. Replaces the separate display + buttons + bezel work. Software-controllable backlight to true zero.                                                     |
 | Audio        | **Adafruit MAX98357A + 1× Dayton CE32A-4** (mono)                          | $6 I2S amp breakout instead of a $32 HAT. Single 1.25" 4Ω driver. Mono for spoken word is fine — at this driver size and bedside distance you wouldn't perceive much stereo image anyway. |
 | Clock source | NTP only (no DS3231 RTC)                                                   | Saves $20 + I2C wiring. Accept that the clock reads briefly wrong after a power-loss-plus-wifi-down event. Easy to add later as a $3 breakout.                                            |
-| Sync         | Stream-first with opportunistic cache                                      | ABS over wifi as default; cache last-played + next chapter for outage resilience.                                                                                                         |
+| Sync         | Standalone / Offline-first                                                 | Completely decoupled from Audiobookshelf. Audiobooks are loaded via SFTP over Wi-Fi onto local storage.                                                                                   |
 | **Renderer** | **Cog (WebKitGTK) on KMS/DRM** — no Xorg, no Chromium                      | ~150MB resident vs Chromium's ~400MB. Boots 4–6s faster. Datastar unchanged.                                                                                                              |
 
 **Estimated total delivered cost: ~$135** (~$77 unique-to-this-build parts).
@@ -24,7 +24,7 @@ _Go + Datastar + Pi Zero 2 W + Display HAT Mini + MAX98357A + CE32A-4 (mono)_
 
 ## 1. Architecture
 
-Single Go binary on the Pi. It owns audio playback, GPIO input, backlight, the Audiobookshelf client, position state, and HTTP/SSE to a kiosk WebKit (Cog) pointed at localhost. Datastar drives the UI: server-rendered HTML, attribute-driven interactivity, and SSE for everything that changes over time. There is no client-side state framework — no React, no htmx-plus-Alpine. Datastar attributes hang off the same DOM the server rendered.
+Single Go binary on the Pi. It owns audio playback, GPIO input, backlight, the library scanner, position state, and HTTP/SSE to a kiosk WebKit (Cog) pointed at localhost. Datastar drives the UI: server-rendered HTML, attribute-driven interactivity, and SSE for everything that changes over time. There is no client-side state framework — no React, no htmx-plus-Alpine. Datastar attributes hang off the same DOM the server rendered.
 
 **Renderer:** [Cog](https://github.com/Igalia/cog) (Igalia's WebKit kiosk shell) on top of [WebKitGTK](https://webkitgtk.org/), rendered directly to KMS/DRM with no Xorg. This is intentionally not Chromium: a single-tab kiosk is exactly what Cog was built for, the resident memory is roughly a third, and skipping Xorg removes a whole boot-time stratum.
 
@@ -35,9 +35,8 @@ Components within the Go binary, all coordinated through an in-process event bus
 | Component       | Responsibility                                                                                               | Inputs                  | Outputs                            |
 | --------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------- | ---------------------------------- |
 | **Player**      | mpv IPC client; play/pause/seek/volume; emits position ticks at 1Hz                                          | Commands from event bus | PlaybackState events               |
-| **Library**     | ABS API client; book/chapter metadata; cover art; search index                                               | HTTP from ABS           | Library queries, cover blobs       |
-| **Sync**        | Position push to ABS; pulls server-side progress on resume; conflict resolution (server wins on newer mtime) | PlaybackState, ABS API  | ProgressSynced events              |
-| **Cache**       | On-disk LRU of decoded chunks for current + next chapter; book-pin support later                             | Player, Library         | Local file paths to Player         |
+| **Library**     | Local filesystem scanner using `ffprobe` (via `ffmpeg`) to extract metadata, chapters, and cover art         | Local audio files       | Library DB updates, cover blobs    |
+| **Media Loader**| SFTP server runs via SSH on Wi-Fi connection to allow easy drag-and-drop file transfers                      | SFTP over Wi-Fi         | File writes to local storage       |
 | **Input**       | GPIO: rotary encoder (quadrature decode), HAT buttons (debounced); push events to bus                        | periph.io GPIO          | InputEvent (rotate, click, button) |
 | **Display**     | Backlight PWM via /sys/class/backlight; modes: full / dim / off-but-clock / fully-off; wake-on-button        | InputEvent, idle timer  | BacklightState events              |
 | **Sleep timer** | Countdown + fade-out + pause; SSE-driven progress to UI                                                      | Timer commands, Player  | TimerTick events, Player commands  |
@@ -49,10 +48,10 @@ State flows one direction: hardware/timers → event bus → SSE merge fragments
 
 ```
             ┌──────────────┐      ┌─────────────────┐
-GPIO ----> │  Input       │─┐    │   Audiobookshelf │
-            │  (periph.io) │ │    │   (K3s server)   │
+GPIO ----> │  Input       │─┐    │  Local Storage  │
+            │  (periph.io) │ │    │ (ffprobe scan)  │
             └──────────────┘ │    └────────^─────────┘
-                             │             │ HTTPS
+                             │             │ Filesystem
                              v             │
                        ┌─────────────────────────┐
                        │     Event Bus (chans)    │
@@ -96,7 +95,7 @@ Cog is purpose-built for set-top-box / infotainment kiosk use cases by Igalia (t
 
 ### 1.5 Why Pi Zero 2 W is enough
 
-With Chromium gone, the Zero 2 W's 512MB RAM is not the limiting factor it used to be. Idle budget with Cog + Go server + mpv lands around 220–260MB resident. CPU is light for spoken-word playback and Datastar fragment patches; the only thing that would stress this SBC is H.264 video cover decode (some ABS books carry one) — we ignore that and serve a static JPEG of the cover.
+With Chromium gone, the Zero 2 W's 512MB RAM is not the limiting factor it used to be. Idle budget with Cog + Go server + mpv lands around 220–260MB resident. CPU is light for spoken-word playback and Datastar fragment patches; the only thing that would stress this SBC is H.264 video cover decode (some M4B books carry one) — we avoid runtime decoding by extracting a static JPEG of the cover using `ffprobe`/`ffmpeg` during the scan phase.
 
 **Power**: a Zero 2 W under this load draws roughly 500–800mA at 5V — comfortable on a 2.5A micro-USB PSU with the MAX98357A on the same supply. No PSU oversizing needed.
 
@@ -127,23 +126,15 @@ mpv handles all of it, runs as a child process, and exposes a stable JSON-over-u
 | `stianeikeland/go-rpio`                                     | Avoid      | mmaps `/dev/mem`, no edge interrupts, polls. Encoders will skip detents at wake-from-idle.                           |
 | `warthog618/go-gpiocdev`                                    | Acceptable | Modern character-device API. Lower-level than periph.io. Use directly if you want zero abstraction.                  |
 
-### 2.3 Audiobookshelf API client
+### 2.3 Local Library Scanner
 
-No mature Go client exists as of writing. ABS publishes an OpenAPI 3 spec at `/api/openapi`. Generate a client with **`oapi-codegen`** (Deepmap) — it produces idiomatic Go with `net/http` or any client you supply.
+Instead of an API client, the appliance scans the local directory (`/var/lib/bedside/audiobooks/`) directly. We rely on **`ffprobe`** (part of `ffmpeg`) to handle metadata extraction because it handles M4B chapters correctly, avoiding the need for complex Go tagging libraries.
 
-```sh
-# go.mod tooling
-go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
-
-# generate
-oapi-codegen -package abs -generate types,client \
-  -o internal/abs/client.gen.go \
-  https://abs.lan/api/openapi.json
-```
-
-Then wrap it with a thin domain layer that exposes only what the player needs: `ListLibraries`, `ListItems(libraryID, filter)`, `GetItem(itemID)`, `GetChapters(itemID)`, `StreamURL(itemID, fileIndex)`, `UpdateProgress(itemID, time, duration)`.
-
-Auth: ABS issues a long-lived API token. Store it in `/etc/bedside/config.toml` with mode 0600.
+A Go goroutine runs periodically or on-demand:
+1. Walks the directory looking for `.m4b`, `.mp3`, `.m4a`.
+2. Runs `ffprobe -v quiet -print_format json -show_format -show_chapters -show_streams /path/to/file` and unmarshals the JSON.
+3. Updates the local `boltdb` library catalog.
+4. Uses `ffmpeg` to extract cover art embedded in the file to `/var/lib/bedside/covers/{fileHash}.jpg`.
 
 ### 2.4 Datastar Go SDK + templating
 
@@ -156,7 +147,7 @@ Datastar publishes a Go SDK ([github.com/starfederation/datastar](https://github
 | HTTP router           | [go-chi/chi/v5](https://github.com/go-chi/chi)                        | Minimal, idiomatic, plays well with templ handlers.   |
 | Audio                 | [mpv (JSON IPC)](https://mpv.io/manual/stable/#json-ipc)              | Spawn as a subprocess; control via unix socket.       |
 | GPIO                  | [periph.io/x/conn/v3](https://periph.io/)                             | Idiomatic Go, edge interrupts via gpiocdev backend.   |
-| ABS client            | [oapi-codegen](https://github.com/oapi-codegen/oapi-codegen)          | Generate from ABS OpenAPI spec.                       |
+| Metadata extraction   | `os/exec` wrapping `ffprobe`                                          | Extract chapters and tags directly from media files.  |
 | Storage               | [go.etcd.io/bbolt](https://github.com/etcd-io/bbolt)                  | Single-file KV; atomic writes survive yanked power.   |
 | Image processing      | [disintegration/imaging](https://github.com/disintegration/imaging)   | Resize cover art to 480px once on download.           |
 | Logging               | [stdlib log/slog](https://pkg.go.dev/log/slog)                        | JSON to journald, structured.                         |
@@ -164,9 +155,9 @@ Datastar publishes a Go SDK ([github.com/starfederation/datastar](https://github
 
 ### 2.5 Other useful bits
 
-- **Cover art cache**: store JPEGs on disk under `/var/lib/bedside/covers/{itemId}.jpg`, serve from Go with strong `ETag`/`Cache-Control`. Decode/resize once with `disintegration/imaging` to a 480px square; the display is 320px so 480 with sharpening looks crisp and saves RAM.
-- **Position persistence**: `boltdb` (`go.etcd.io/bbolt`) — single file, no daemon, atomic writes survive yanked power. Bucket: `progress`, key: `itemId`, value: protobuf-or-JSON of `{position, chapterIdx, updatedAt}`. Flush on every SSE tick (1Hz) — bbolt handles that fine.
-- **Search**: client-side over the local cached library list with `blevesearch/bleve` if the library is large (>1000 items). Otherwise a `strings.Contains` over normalized titles in a goroutine works.
+- **Cover art cache**: store JPEGs on disk under `/var/lib/bedside/covers/{fileHash}.jpg`. Use `ffmpeg` to extract the embedded cover art during the library scan. Decode/resize once with `disintegration/imaging` to a 480px square.
+- **Position persistence**: `boltdb` (`go.etcd.io/bbolt`) — single file, no daemon, atomic writes survive yanked power. Bucket: `progress`, key: `fileHash`, value: JSON of `{position, chapterIdx, updatedAt}`. Flush on every SSE tick (1Hz). The `library` bucket also stores the full metadata catalog.
+- **Search**: a simple `strings.Contains` over normalized titles in a goroutine over the `boltdb` library catalog.
 
 ---
 
@@ -420,7 +411,7 @@ func Open() (*Pins, error) {
 | --------- | ----- | ------------------------------ | ----------------- | ----------------------------------------------------------- |
 | p1        | vfat  | /boot/firmware                 | ro at runtime     | Pi firmware + config.txt                                    |
 | p2        | ext4  | / (lower)                      | ro via overlay    | OS, Go binary, Cog, assets                                  |
-| p3        | ext4  | /var/lib/bedside               | rw, sync, noatime | boltdb (positions), cover cache, ABS token                  |
+| p3        | ext4  | /var/lib/bedside               | rw, sync, noatime | boltdb (library, positions), cover cache, audiobook files   |
 | tmpfs     | tmpfs | /var/log, /tmp, /var/cache/cog | rw                | Volatile; WebKit disk cache lives here so SD never sees it. |
 
 ### 5.3 Packages
@@ -482,13 +473,12 @@ The Pi has no real-time clock and we've explicitly skipped the DS3231 to keep th
 
 ### 5.6 Position resume strategy
 
-Three layers, in order of trust:
+Two layers:
 
 - **On-device (bbolt)**: written every SSE tick (~1Hz) and again on `pause`/`stop`/`SIGTERM`. Survives power yank because bbolt fsyncs. This is the source of truth for cold boot.
-- **Audiobookshelf**: pushed on every chapter change and every 10 seconds while playing. On boot, after the local position loads, fetch ABS progress and pick the newer `updatedAt`.
 - **mpv watch-later**: leave disabled — we own resume.
 
-On boot: load last-played `itemId` from bbolt, fetch metadata (cached or fresh), compare positions, seek mpv to the chosen offset, do **not** auto-play. Show now-playing screen with a big play affordance — bedside ergonomics: never start blasting audio because power flickered.
+On boot: load last-played `fileHash` from bbolt, fetch metadata from boltdb `library` bucket, seek mpv to the chosen offset, do **not** auto-play. Show now-playing screen with a big play affordance — bedside ergonomics: never start blasting audio because power flickered.
 
 ### 5.7 Sleep timer as SSE-driven hypermedia
 
@@ -507,7 +497,7 @@ This is purely server state pushed as HTML — no client timer drift, no JS coun
 | **Home**        | Glanceable status; clock when idle                          | Continue listening (1 card), library button, settings, current time |
 | **Library**     | Browse + search                                             | Encoder scrolls list; press selects; back returns home              |
 | **Now playing** | Most stateful screen; cover, chapter, progress, sleep timer | Play/pause, ±30s, sleep timer toggle, back                          |
-| **Settings**    | Backlight, volume, ABS server, sync now, restart            | Encoder + buttons                                                   |
+| **Settings**    | Backlight, volume, scan library, restart                    | Encoder + buttons                                                   |
 | **Clock-only**  | Display-off-but-clock mode                                  | Any button wakes to previous screen                                 |
 
 ### 6.2 Layout (Display HAT Mini, 320×240 landscape)
@@ -692,14 +682,14 @@ Distinct from display-off. Backlight at ~5%, screen renders a giant clock with n
 
 - MAX98357A has a small turn-on transient (click) when the amp first comes out of shutdown. Mitigate by leaving the SD pin floating (amp stays awake) and by keeping mpv running idle (`--idle`) so the I2S clock stays alive; sleep timer fades volume to silence rather than hard-pausing.
 - ALSA volume limit: set a hard ceiling in `/etc/asound.conf` so a fat-fingered encoder spin can't blast at 3am. Map UI 0–100% to ALSA 0–80% of nominal.
-- Sample-rate mismatch: ABS streams may be 22.05 / 44.1 / 48 kHz mixed in a single book. Let mpv resample; don't try to set the ALSA device rate.
+- Sample-rate mismatch: Audiobook files may be 22.05 / 44.1 / 48 kHz mixed in a single book. Let mpv resample; don't try to set the ALSA device rate.
 - **Speaker-driver sizing reality check**: CE32A-4 is a 1.25" full-range. It will not deliver chest-thumping bass — it doesn't need to. Spoken word lives in 200Hz–6kHz and the CE32A-4 covers that range cleanly. If you find yourself wanting more bottom-end in evaluation, a small (~30 cubic inch) sealed enclosure with a fistful of polyfill helps; do not chase the missing low end by EQ — you'll just bottom out the driver and clip.
 - **Mono is fine for spoken word at this scale.** The MAX98357A is mono by design; if you ever want stereo, you wire two of them in parallel (one set to left channel, one to right via the SEL pin) and add a second CE32A-4. That's a $20 upgrade you can do later without ripping anything out.
 
 ### 7.8 Privacy / scope
 
 - No microphone. No speech assistant. No phone pairing. The bedroom stays a phone-free zone — that's the whole point.
-- Local network only. The device talks only to your ABS K3s service via your wifi. No outbound calls, no telemetry. Block egress at your router if you want belt-and-suspenders.
+- Local network only. The device only connects to wifi for NTP time sync and SFTP file transfers. No outbound calls, no telemetry. Block egress at your router if you want belt-and-suspenders.
 
 ---
 
@@ -709,7 +699,7 @@ Distinct from display-off. Backlight at ~5%, screen renders a giant clock with n
 | ----- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **0** | Bench rig            | Pi Zero 2 W + Display HAT Mini + MAX98357A breadboarded with a single CE32A-4 speaker. Plays a hardcoded local M4B; backlight goes to zero on demand. |
 | **1** | Go skeleton          | templ + chi + Datastar SSE; Cog kiosk loads the page; pressing HAT Button A pauses playback.                                                          |
-| **2** | ABS integration      | Generated client lists books, streams URL into mpv, position syncs both ways.                                                                         |
+| **2** | Local Library Scan   | `ffprobe` scans `/var/lib/bedside/audiobooks`, populates `boltdb`, and mpv plays local files directly.                                                |
 | **3** | Library UI           | Browse + search via encoder; cover art rendering at 480px square.                                                                                     |
 | **4** | Now-playing complete | Chapter changes, ±30, sleep timer, real-time progress.                                                                                                |
 | **5** | Bedside polish       | Backlight modes, clock-only, wake-on-button, read-only root, watchdog.                                                                                |

@@ -14,6 +14,7 @@ packages:
   - libasound2
   - alsa-utils
   - network-manager
+  - ffmpeg
 apt:
   preserve_sources_list: true
   conf: |
