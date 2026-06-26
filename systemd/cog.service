@@ -1,0 +1,28 @@
+[Unit]
+Description=Bedside Kiosk (Cog on KMS/DRM)
+After=bedside.service systemd-user-sessions.service
+Requires=bedside.service
+ConditionPathExists=/dev/dri/card0
+
+[Service]
+Type=simple
+User=bedside
+Group=bedside
+SupplementaryGroups=video render input
+
+# No DISPLAY, no XAUTHORITY. Cog renders straight to /dev/dri/card0.
+Environment=WEBKIT_DISABLE_COMPOSITING_MODE=0
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+
+ExecStartPre=/usr/bin/sh -c 'until curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'
+ExecStart=/usr/bin/cog \
+  --platform=drm \
+  --geometry=320x240 \
+  --bg-color=000000 \
+  http://localhost:8080
+
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=Bedside Audiobook Player
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/bedside
+Restart=always
+RestartSec=2
+User=bedside
+Group=bedside
+SupplementaryGroups=audio gpio video
+StateDirectory=bedside
+ReadWritePaths=/var/lib/bedside
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+WatchdogSec=30
+
+[Install]
+WantedBy=multi-user.target

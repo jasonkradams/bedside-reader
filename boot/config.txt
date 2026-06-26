@@ -1,0 +1,63 @@
+# For more options and information see
+# http://rptl.io/configtxt
+# Some settings may impact device functionality. See link above for details
+
+# Enable required hardware interfaces for the screen & amp
+dtparam=spi=on
+dtparam=i2s=on
+
+# Disable onboard audio (using MAX98357A via I2S instead)
+dtparam=audio=off
+
+# Additional overlays and parameters are documented
+# /boot/firmware/overlays/README
+
+# Automatically load overlays for detected cameras and DSI displays
+camera_auto_detect=1
+display_auto_detect=1
+
+# Automatically load initramfs files, if found
+auto_initramfs=1
+
+# Enable DRM VC4 V3D driver (Crucial for Cog/KMS rendering)
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+
+# Don't have the firmware create an initial video= setting in cmdline.txt.
+disable_fw_kms_setup=1
+
+# Run in 64-bit mode
+arm_64bit=1
+
+# Disable compensation for displays with overscan
+disable_overscan=1
+
+# Run as fast as firmware / board allows
+arm_boost=1
+
+# --- Appliance-Specific Overlays ---
+
+# MAX98357A speaks the same I2S protocol as HiFiBerry's DAC
+dtoverlay=hifiberry-dac
+
+# Display HAT Mini — ST7789V via SPI, driven through the upstream
+# mipi-dbi-spi DRM driver so Cog/KMS can render to it directly.
+dtoverlay=mipi-dbi-spi,speed=60000000
+dtparam=compatible=sitronix\,st7789v\0panel-mipi-dbi-spi
+dtparam=width=320,height=240,width-mm=43,height-mm=27
+dtparam=reset-gpio=25,dc-gpio=9,backlight-gpio=13
+
+# Hardware watchdog (Zero 2 W has BCM2837 watchdog)
+dtparam=watchdog=on
+
+# --- Hardware Filters (Ignored on Pi Zero 2 W, safe to keep) ---
+[cm4]
+otg_mode=1
+
+[cm5]
+dtoverlay=dwc2,dr_mode=host
+
+[pi5]
+dtoverlay=nospi10
+
+[all]
