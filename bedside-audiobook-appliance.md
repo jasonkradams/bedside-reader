@@ -15,7 +15,7 @@ _Go + Datastar + Pi Zero 2 W + Display HAT Mini + MAX98357A + CE32A-4 (mono)_
 | Display      | **Pimoroni Display HAT Mini** (2.0" IPS SPI + 4 onboard buttons + RGB LED) | Stacks directly on the Pi header. Replaces the separate display + buttons + bezel work. Software-controllable backlight to true zero.                                                     |
 | Audio        | **Adafruit MAX98357A + 1× Dayton CE32A-4** (mono)                          | $6 I2S amp breakout instead of a $32 HAT. Single 1.25" 4Ω driver. Mono for spoken word is fine — at this driver size and bedside distance you wouldn't perceive much stereo image anyway. |
 | Clock source | NTP only (no DS3231 RTC)                                                   | Saves $20 + I2C wiring. Accept that the clock reads briefly wrong after a power-loss-plus-wifi-down event. Easy to add later as a $3 breakout.                                            |
-| Sync         | Standalone / Offline-first                                                 | Completely decoupled from Audiobookshelf. Audiobooks are loaded via SFTP over Wi-Fi onto local storage.                                                                                   |
+| Sync         | Standalone / Offline-first                                                 | Completely decoupled from Audiobookshelf. Audiobooks are loaded via Samba (SMB) share over Wi-Fi onto local storage.                                                                      |
 | **Renderer** | **Cog (WebKitGTK) on KMS/DRM** — no Xorg, no Chromium                      | ~150MB resident vs Chromium's ~400MB. Boots 4–6s faster. Datastar unchanged.                                                                                                              |
 
 **Estimated total delivered cost: ~$135** (~$77 unique-to-this-build parts).
@@ -36,7 +36,7 @@ Components within the Go binary, all coordinated through an in-process event bus
 | --------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------- | ---------------------------------- |
 | **Player**      | mpv IPC client; play/pause/seek/volume; emits position ticks at 1Hz                                          | Commands from event bus | PlaybackState events               |
 | **Library**     | Local filesystem scanner using `ffprobe` (via `ffmpeg`) to extract metadata, chapters, and cover art         | Local audio files       | Library DB updates, cover blobs    |
-| **Media Loader**| SFTP server runs via SSH on Wi-Fi connection to allow easy drag-and-drop file transfers                      | SFTP over Wi-Fi         | File writes to local storage       |
+| **Media Loader**| Samba (SMB) share runs on Wi-Fi connection to allow easy drag-and-drop file transfers from any OS            | SMB over Wi-Fi          | File writes to local storage       |
 | **Input**       | GPIO: rotary encoder (quadrature decode), HAT buttons (debounced); push events to bus                        | periph.io GPIO          | InputEvent (rotate, click, button) |
 | **Display**     | Backlight PWM via /sys/class/backlight; modes: full / dim / off-but-clock / fully-off; wake-on-button        | InputEvent, idle timer  | BacklightState events              |
 | **Sleep timer** | Countdown + fade-out + pause; SSE-driven progress to UI                                                      | Timer commands, Player  | TimerTick events, Player commands  |
@@ -689,7 +689,7 @@ Distinct from display-off. Backlight at ~5%, screen renders a giant clock with n
 ### 7.8 Privacy / scope
 
 - No microphone. No speech assistant. No phone pairing. The bedroom stays a phone-free zone — that's the whole point.
-- Local network only. The device only connects to wifi for NTP time sync and SFTP file transfers. No outbound calls, no telemetry. Block egress at your router if you want belt-and-suspenders.
+- Local network only. The device only connects to wifi for NTP time sync and Samba (SMB) file transfers. No outbound calls, no telemetry. Block egress at your router if you want belt-and-suspenders.
 
 ---
 
