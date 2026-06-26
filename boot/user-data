@@ -27,10 +27,10 @@ keyboard:
 user:
   name: pi
   shell: /bin/bash
-  lock_passwd: false
-  passwd: "$y$jB5$bFqHsMqOFR4HcBJQDx0Km.$VbEaBZ3zC4UC6a0U6SVc8JUmkcqg7K4en6wWTq/.qH1"
+  lock_passwd: true
   ssh_authorized_keys:
     - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDc9KNU/L1z5CANZyAK3MHIjziMWBA8b26Bzt2BlMQTIYhicTyVyY6KP8GxUWMCHvTjy5d1yz/57Emati++EnIPCzQA0Gl3R21AxKfLSrvvO8ziUjtqPv3SWu+W8yM6M/LlnFMD5FIcFEJeBxBreviac/gdvyWLkTVT5dsMtLQpMb1cDEyMHH2Bd37/x0zEWof/HKWsJzeab9r6kAYsNrcB0mPOH6+BjTs53VdSuMQCYwIH0lc4Uz3MVVpGWZRKnLp6ngHmPU52VV718heh0pMB7sxJ5B0sH5tS/TB/PbV42IgaQGWnn+yxylbn7isqvZqFD6dOj4ZJlmoNzNysyEYNk8LsgJnNtcX+cNPl90LZnVNkx1aWoRKIOkVyyLXrVxr8aAK2GAes5oQlaDO+nU1fxoC76sGHt//FfYjwuM1i+0B+vnMdEHxaKRF1y9yYX9VNtq1/FBNZmn7tvUua/uXW7f8ZNz6bzMvfJoBPis/oRXg2+IuE3ijBC2boqXud1aOZd6i/wewwexChIYrMvX8sTL8XFbB7qX1sU9HR8651cDCHWxvYtpE2WPT7Z43eWvu8/pmTHzMGb07vJO9uxFzOtYYgQYtXw1iwmAxyxsE/iHMOKLbI3TBb7STiBNTsfDvegCnKG6OsPRcA0rKALi4NLEF/q5VxfVdtuKuzmRBzGQ=="
+    - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFi9PGouQ/5XIMO6NSUzOqVPkPBFR9DmWDOjF1CZ96Io"
 ssh_pwauth: false
 
 write_files:
