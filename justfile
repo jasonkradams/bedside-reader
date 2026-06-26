@@ -11,3 +11,5 @@ stage-boot boot_dir="/Volumes/bootfs":
     fi
     cp -v boot/config.txt "{{boot_dir}}/config.txt"
     cp -v boot/cmdline.txt "{{boot_dir}}/cmdline.txt"
+    cp -v boot/user-data "{{boot_dir}}/user-data"
+

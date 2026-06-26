@@ -411,6 +411,8 @@ func Open() (*Pins, error) {
 - **Read-only root + tmpfs overlay** for `/var/log` and Cog's WebKit cache. Use `overlayroot` (Debian) or hand-roll with `overlayfs` in initramfs. Position DB on a separate writable partition mounted noatime.
 - **Optimized Kernel Command Line**: The optimized `/boot/firmware/cmdline.txt` configuration is stored in the repository at [boot/cmdline.txt](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/boot/cmdline.txt). It contains parameters (`quiet splash loglevel=3 logo.nologo`) to suppress system diagnostics and logos for a silent, appliance-like boot.
 - **Boot Partition Cleanup**: To optimize disk space and remove clutter on a Pi Zero 2 W, delete redundant boot firmware and device trees for other architectures (e.g., `kernel_2712.img`, `initramfs_2712`, `start4*.elf`, `fixup4*.dat`, and unused `.dtb` files).
+- **Automated Provisioning (cloud-init)**: The customized `/boot/firmware/user-data` configuration is stored in the repository at [boot/user-data](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/boot/user-data). It automates the installation of required packages, creates the `bedside` system user and groups, writes udev rules and systemd service files, and automatically starts services on first boot.
+
 
 ### 5.2 Partition layout
 

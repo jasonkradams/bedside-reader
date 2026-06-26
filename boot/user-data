@@ -1,0 +1,113 @@
+#cloud-config
+manage_resolv_conf: false
+
+hostname: bedside-reader
+manage_etc_hosts: true
+packages:
+  - avahi-daemon
+  - cog
+  - libwpebackend-fdo-1.0-1
+  - libwpewebkit-1.1-0
+  - mpv
+  - libmpv2
+  - fonts-inter
+  - libasound2
+  - alsa-utils
+  - network-manager
+apt:
+  preserve_sources_list: true
+  conf: |
+    Acquire {
+      Check-Date "false";
+    };
+timezone: America/Los_Angeles
+keyboard:
+  model: pc105
+  layout: "us"
+user:
+  name: pi
+  shell: /bin/bash
+  lock_passwd: false
+  passwd: "$y$jB5$bFqHsMqOFR4HcBJQDx0Km.$VbEaBZ3zC4UC6a0U6SVc8JUmkcqg7K4en6wWTq/.qH1"
+  ssh_authorized_keys:
+    - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDc9KNU/L1z5CANZyAK3MHIjziMWBA8b26Bzt2BlMQTIYhicTyVyY6KP8GxUWMCHvTjy5d1yz/57Emati++EnIPCzQA0Gl3R21AxKfLSrvvO8ziUjtqPv3SWu+W8yM6M/LlnFMD5FIcFEJeBxBreviac/gdvyWLkTVT5dsMtLQpMb1cDEyMHH2Bd37/x0zEWof/HKWsJzeab9r6kAYsNrcB0mPOH6+BjTs53VdSuMQCYwIH0lc4Uz3MVVpGWZRKnLp6ngHmPU52VV718heh0pMB7sxJ5B0sH5tS/TB/PbV42IgaQGWnn+yxylbn7isqvZqFD6dOj4ZJlmoNzNysyEYNk8LsgJnNtcX+cNPl90LZnVNkx1aWoRKIOkVyyLXrVxr8aAK2GAes5oQlaDO+nU1fxoC76sGHt//FfYjwuM1i+0B+vnMdEHxaKRF1y9yYX9VNtq1/FBNZmn7tvUua/uXW7f8ZNz6bzMvfJoBPis/oRXg2+IuE3ijBC2boqXud1aOZd6i/wewwexChIYrMvX8sTL8XFbB7qX1sU9HR8651cDCHWxvYtpE2WPT7Z43eWvu8/pmTHzMGb07vJO9uxFzOtYYgQYtXw1iwmAxyxsE/iHMOKLbI3TBb7STiBNTsfDvegCnKG6OsPRcA0rKALi4NLEF/q5VxfVdtuKuzmRBzGQ=="
+ssh_pwauth: false
+
+write_files:
+  - path: /etc/udev/rules.d/90-backlight.rules
+    owner: root:root
+    permissions: '0644'
+    content: |
+      SUBSYSTEM=="backlight", ACTION=="add", \
+        RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", \
+        RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"
+
+  - path: /etc/systemd/system/bedside.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Bedside Audiobook Player
+      After=network-online.target sound.target
+      Wants=network-online.target
+
+      [Service]
+      Type=notify
+      ExecStart=/usr/local/bin/bedside
+      Restart=always
+      RestartSec=2
+      User=bedside
+      Group=bedside
+      SupplementaryGroups=audio gpio video
+      StateDirectory=bedside
+      ReadWritePaths=/var/lib/bedside
+      ProtectSystem=strict
+      ProtectHome=true
+      NoNewPrivileges=true
+      WatchdogSec=30
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/cog.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Bedside Kiosk (Cog on KMS/DRM)
+      After=bedside.service systemd-user-sessions.service
+      Requires=bedside.service
+      ConditionPathExists=/dev/dri/card0
+
+      [Service]
+      Type=simple
+      User=bedside
+      Group=bedside
+      SupplementaryGroups=video render input
+
+      # No DISPLAY, no XAUTHORITY. Cog renders straight to /dev/dri/card0.
+      Environment=WEBKIT_DISABLE_COMPOSITING_MODE=0
+      Environment=XDG_RUNTIME_DIR=/run/user/%U
+
+      ExecStartPre=/usr/bin/sh -c 'until curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'
+      ExecStart=/usr/bin/cog \
+        --platform=drm \
+        --geometry=320x240 \
+        --bg-color=000000 \
+        http://localhost:8080
+
+      Restart=always
+      RestartSec=2
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - [ systemctl, enable, --now, ssh ]
+  - [ groupadd, -f, bedside ]
+  - [ useradd, -r, -g, bedside, -G, "audio,gpio,video,render,input", -s, /usr/sbin/nologin, bedside ]
+  - [ udevadm, control, --reload-rules ]
+  - [ udevadm, trigger ]
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, enable, bedside.service ]
+  - [ systemctl, enable, cog.service ]
