@@ -1,6 +1,7 @@
 # List all available recipes
-default:
+_default:
     @just --list
+
 
 # Stage boot configuration files (config.txt, cmdline.txt) to the Pi boot partition
 stage-boot boot_dir="/Volumes/bootfs":
