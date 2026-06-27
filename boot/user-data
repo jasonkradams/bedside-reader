@@ -91,12 +91,13 @@ write_files:
       [Service]
       User=root
       Environment=WLR_DRM_DEVICES=/dev/dri/card0
+      Environment=WLR_DRM_NO_MODIFIERS=1
+      Environment=WLR_NO_HARDWARE_CURSORS=1
       Environment=XDG_RUNTIME_DIR=/run/user/0
-      Environment=WEBKIT_DISABLE_COMPOSITING_MODE=1
       ExecStartPre=/usr/bin/mkdir -p /run/user/0
       ExecStartPre=/usr/bin/chmod 700 /run/user/0
       ExecStartPre=/usr/bin/sh -c 'until curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'
-      ExecStart=/usr/bin/cage -d -m drm -- /usr/bin/cog -P wl --bg-color=000000 http://localhost:8080
+      ExecStart=/usr/bin/cage -s -d -m drm -- /usr/bin/cog -P wl --bg-color=000000 http://localhost:8080
       Restart=always
       RestartSec=5
 
