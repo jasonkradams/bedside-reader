@@ -42,7 +42,7 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 			log.Printf("Warning: Failed to find pin %s", b.Pin)
 			continue
 		}
-		if err := pin.In(gpio.PullUp, gpio.FallingEdge); err != nil {
+		if err := pin.In(gpio.PullUp, gpio.NoEdge); err != nil {
 			log.Printf("Warning: Failed to set pin %s to input: %v", b.Pin, err)
 			continue
 		}
@@ -56,12 +56,14 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 }
 
 func (m *InputManager) watchButton(pin gpio.PinIO, event bus.EventType) {
+	wasPressed := false
 	for {
-		// WaitForEdge blocks until an edge is detected
-		if pin.WaitForEdge(-1) {
-			// Extremely simple debounce: just sleep for 200ms after a press
+		isPressed := pin.Read() == gpio.Low
+		if isPressed && !wasPressed {
 			m.bus.Publish(event, nil)
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond) // debounce
 		}
+		wasPressed = isPressed
+		time.Sleep(20 * time.Millisecond) // poll every 20ms
 	}
 }
