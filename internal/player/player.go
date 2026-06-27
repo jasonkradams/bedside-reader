@@ -31,9 +31,23 @@ type Player struct {
 	pendingSeek float64
 	lastSave    time.Time
 
-	mutePin gpio.PinOut
+	mutePin   gpio.PinOut
+	muteTimer *time.Timer
 
 	State PlaybackState
+}
+
+// triggerMute temporarily pulls the hardware mute pin low to mask I2S clock transients
+func (p *Player) triggerMute() {
+	if p.mutePin != nil {
+		p.mutePin.Out(gpio.Low)
+		if p.muteTimer != nil {
+			p.muteTimer.Stop()
+		}
+		p.muteTimer = time.AfterFunc(100*time.Millisecond, func() {
+			p.mutePin.Out(gpio.High)
+		})
+	}
 }
 
 // PlaybackState represents the current state of the player
@@ -233,8 +247,11 @@ func (p *Player) LoadFile(path string) error {
 	// 5. Mute output instantly to hide transition buzzing, will unmute on file-loaded
 	p.sendCommand("set_property", "mute", true)
 	if p.mutePin != nil {
-		p.mutePin.Out(gpio.Low) // Hardware Mute
-	}
+		p.mutePin.Out(gpio.Low) // Keep mute until Play/Resume
+		if p.muteTimer != nil {
+			p.muteTimer.Stop()
+		}
+	} // Hardware Mute
 
 	p.State.Paused = false
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
@@ -252,14 +269,7 @@ func (p *Player) TogglePause() error {
 		_, _, timeout, _ := p.lib.GetSystemState()
 		p.lib.SaveSystemState(p.currentPath, true, timeout)
 		p.sendCommandNoLock("set_property", "pause", false)
-
-		if p.mutePin != nil {
-			// Delay hardware unmute to let the BCLK settle (just like loadfile)
-			go func() {
-				time.Sleep(100 * time.Millisecond)
-				p.mutePin.Out(gpio.High)
-			}()
-		}
+		p.triggerMute()
 	} else {
 		// Pause native stream (keeps ALSA open, stopping I2S clock pops!)
 		p.State.Paused = true
@@ -269,6 +279,9 @@ func (p *Player) TogglePause() error {
 
 		if p.mutePin != nil {
 			p.mutePin.Out(gpio.Low) // Hardware Mute (Kills DAC hiss!)
+			if p.muteTimer != nil {
+				p.muteTimer.Stop()
+			}
 		}
 
 		// Immediately save progress to disk
@@ -294,6 +307,7 @@ func (p *Player) Seek(deltaSeconds float64) error {
 		return nil
 	}
 
+	p.triggerMute()
 	return p.sendCommandNoLock("seek", deltaSeconds, "relative", "exact")
 }
 
@@ -335,6 +349,7 @@ func (p *Player) SkipChapter(delta int) error {
 		return nil
 	}
 
+	p.triggerMute()
 	return p.sendCommandNoLock("add", "chapter", delta)
 }
 
