@@ -120,7 +120,8 @@ func (p *Player) listen() {
 		}
 
 		if event, ok := msg["event"].(string); ok {
-			if event == "file-loaded" {
+			switch event {
+			case "file-loaded":
 				p.reqMutex.Lock()
 
 				// Unmute the audio now that the file is fully loaded and ready to play
@@ -132,13 +133,13 @@ func (p *Player) listen() {
 						p.mutePin.Out(gpio.High) // Hardware Unmute
 					}()
 				}
-				
+
 				if p.pendingSeek > 0 {
 					p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
 					p.pendingSeek = 0
 				}
 				p.reqMutex.Unlock()
-			} else if event == "property-change" {
+			case "property-change":
 				name, _ := msg["name"].(string)
 				data := msg["data"]
 
@@ -151,7 +152,8 @@ func (p *Player) listen() {
 							p.bus.Publish(bus.EventPlayerProgressTick, p.State)
 							if time.Since(p.lastSave) > 10*time.Second {
 								p.lib.SaveProgress(p.State.FilePath, p.State.Position)
-								p.lib.SaveSystemState(p.currentPath, !p.State.Paused)
+								_, _, timeout, _ := p.lib.GetSystemState()
+								p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
 								p.lastSave = time.Now()
 							}
 						}
@@ -209,13 +211,15 @@ func (p *Player) LoadFile(path string) error {
 	// 1. Save progress of CURRENT file before switching
 	if p.State.FilePath != "" && p.State.Position > 0 {
 		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
-		p.lib.SaveSystemState(p.currentPath, !p.State.Paused)
+		_, _, timeout, _ := p.lib.GetSystemState()
+		p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
 	}
 
 	// 3. Update state for new file
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
-	p.lib.SaveSystemState(path, true)
+	_, _, timeout, _ := p.lib.GetSystemState()
+	p.lib.SaveSystemState(path, true, timeout)
 
 	// 4. Load saved progress for the NEW file
 	if pos, err := p.lib.GetProgress(p.State.FilePath); err == nil && pos > 0 {
@@ -245,9 +249,10 @@ func (p *Player) TogglePause() error {
 	if p.State.Paused {
 		// Resume playing
 		p.State.Paused = false
-		p.lib.SaveSystemState(p.currentPath, true)
+		_, _, timeout, _ := p.lib.GetSystemState()
+		p.lib.SaveSystemState(p.currentPath, true, timeout)
 		p.sendCommandNoLock("set_property", "pause", false)
-		
+
 		if p.mutePin != nil {
 			// Delay hardware unmute to let the BCLK settle (just like loadfile)
 			go func() {
@@ -258,13 +263,14 @@ func (p *Player) TogglePause() error {
 	} else {
 		// Pause native stream (keeps ALSA open, stopping I2S clock pops!)
 		p.State.Paused = true
-		p.lib.SaveSystemState(p.currentPath, false)
+		_, _, timeout, _ := p.lib.GetSystemState()
+		p.lib.SaveSystemState(p.currentPath, false, timeout)
 		p.sendCommandNoLock("set_property", "pause", true)
-		
+
 		if p.mutePin != nil {
 			p.mutePin.Out(gpio.Low) // Hardware Mute (Kills DAC hiss!)
 		}
-		
+
 		// Immediately save progress to disk
 		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/jasonkradams/bedside-reader/internal/bus"
+	"github.com/jasonkradams/bedside-reader/internal/display"
 	"github.com/jasonkradams/bedside-reader/internal/input"
 	"github.com/jasonkradams/bedside-reader/internal/library"
 	"github.com/jasonkradams/bedside-reader/internal/player"
@@ -50,9 +51,9 @@ func main() {
 	defer mpv.Close()
 
 	// Resume System State!
-	activePath, playing, err := lib.GetSystemState()
+	activePath, playing, screenTimeoutMins, err := lib.GetSystemState()
 	if err == nil && activePath != "" {
-		log.Printf("Resuming state: %s (Playing: %v)", activePath, playing)
+		log.Printf("Resuming state: %s (Playing: %v, Timeout: %dm)", activePath, playing, screenTimeoutMins)
 		mpv.LoadFile(activePath)
 		if !playing {
 			mpv.TogglePause() // LoadFile automatically plays, so pause if it wasn't playing
@@ -64,10 +65,34 @@ func main() {
 	// 6. Connect Input to Player logic
 	ch := eventBus.Subscribe()
 	go func() {
+		scrubMode := false
+		var lastEncoderBtnTime time.Time
+		var singleClickTimer *time.Timer
+		var screenTimer *time.Timer
+		screenOff := false
+
+		resetScreen := func() bool {
+			wasOff := screenOff
+			screenOff = false
+			// Turn on backlight!
+			display.SetBacklight(true)
+
+			if screenTimer != nil {
+				screenTimer.Stop()
+			}
+			if screenTimeoutMins > 0 {
+				screenTimer = time.AfterFunc(time.Duration(screenTimeoutMins)*time.Minute, func() {
+					eventBus.Publish("screen-timeout", nil)
+				})
+			}
+			return wasOff
+		}
+
+		resetScreen() // Start the timer
+
 		inMenu := false
 		menuIndex := 0
 		var menuBooks []library.Audiobook
-		scrubMode := false // Toggle for encoder behavior
 
 		publishMenu := func() {
 			eventBus.Publish(bus.EventMenuUpdate, bus.MenuState{
@@ -81,17 +106,58 @@ func main() {
 			switch ev.Type {
 			case bus.EventButtonPlayPause:
 				log.Println("Received EventButtonPlayPause")
-				if inMenu {
-					if len(menuBooks) > 0 && menuIndex < len(menuBooks) {
-						mpv.LoadFile(menuBooks[menuIndex].FilePath)
-					}
-					inMenu = false
-					publishMenu()
-				} else {
-					mpv.TogglePause()
+				if resetScreen() {
+					continue
 				}
+				mpv.TogglePause()
+			case "encoder-single-click":
+				if screenOff {
+					continue // Edge case
+				}
+				if inMenu {
+					// Cycle timeout: 0 (Off) -> 1 -> 5 -> 15 -> 60 -> 0
+					if menuIndex == 0 {
+						switch screenTimeoutMins {
+						case 0:
+							screenTimeoutMins = 1
+						case 1:
+							screenTimeoutMins = 5
+						case 5:
+							screenTimeoutMins = 15
+						case 15:
+							screenTimeoutMins = 60
+						case 60:
+							screenTimeoutMins = 0
+						default:
+							screenTimeoutMins = 5
+						}
+
+						// Save it immediately
+						lib.SaveSystemState(mpv.State.FilePath, !mpv.State.Paused, screenTimeoutMins)
+
+						resetScreen()
+						publishMenu() // Refresh menu
+					} else if len(menuBooks) > 0 {
+						// Play book! (menuIndex-1 because index 0 is settings)
+						bookIdx := menuIndex - 1
+						if bookIdx >= 0 && bookIdx < len(menuBooks) {
+							mpv.LoadFile(menuBooks[bookIdx].FilePath)
+							inMenu = false
+							publishMenu()
+						}
+					}
+				} else {
+					scrubMode = !scrubMode
+					gui.SetScrubMode(scrubMode)
+				}
+			case "screen-timeout":
+				screenOff = true
+				display.SetBacklight(false)
 			case bus.EventButtonSkipFwd:
 				log.Println("Received EventButtonSkipFwd")
+				if resetScreen() {
+					continue
+				}
 				if inMenu {
 					if menuIndex > 0 {
 						menuIndex--
@@ -102,8 +168,11 @@ func main() {
 				}
 			case bus.EventButtonSkipBack:
 				log.Println("Received EventButtonSkipBack")
+				if resetScreen() {
+					continue
+				}
 				if inMenu {
-					if menuIndex < len(menuBooks)-1 {
+					if menuIndex < len(menuBooks) {
 						menuIndex++
 						publishMenu()
 					}
@@ -112,35 +181,57 @@ func main() {
 				}
 			case bus.EventButtonMenu:
 				log.Println("Received EventButtonMenu")
+				if resetScreen() {
+					continue
+				}
 				inMenu = !inMenu
 				if inMenu {
 					menuBooks, _ = lib.GetAll()
 
 					// Find the currently playing book to set the cursor
 					currentPath := mpv.State.FilePath
-					menuIndex = 0
+					menuIndex = 1 // 0 is settings
 					for i, b := range menuBooks {
-						if filepath.Base(b.FilePath) == currentPath {
-							menuIndex = i
+						if filepath.Base(b.FilePath) == filepath.Base(currentPath) {
+							menuIndex = i + 1
 							break
 						}
 					}
 				}
 				publishMenu()
 			case bus.EventEncoderBtn:
-				log.Println("Received EventEncoderBtn")
-				scrubMode = !scrubMode
-				if scrubMode {
-					log.Println("Encoder Mode: Scrubbing")
+				if resetScreen() {
+					continue
+				}
+
+				now := time.Now()
+				if now.Sub(lastEncoderBtnTime) < 400*time.Millisecond {
+					// Double click!
+					if singleClickTimer != nil {
+						singleClickTimer.Stop()
+					}
+					screenOff = true
+					display.SetBacklight(false)
+					if screenTimer != nil {
+						screenTimer.Stop()
+					}
+					lastEncoderBtnTime = time.Time{} // reset
 				} else {
-					log.Println("Encoder Mode: Volume")
+					// Schedule single click
+					singleClickTimer = time.AfterFunc(400*time.Millisecond, func() {
+						eventBus.Publish("encoder-single-click", nil)
+					})
+					lastEncoderBtnTime = now
 				}
 			case bus.EventEncoderTurn:
+				if resetScreen() {
+					continue
+				}
 				delta, ok := ev.Payload.(int)
 				if ok {
 					if inMenu {
 						// Scroll menu!
-						if delta > 0 && menuIndex < len(menuBooks)-1 {
+						if delta > 0 && menuIndex < len(menuBooks) {
 							menuIndex++
 							publishMenu()
 						} else if delta < 0 && menuIndex > 0 {

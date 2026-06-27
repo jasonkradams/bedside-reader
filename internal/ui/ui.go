@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"github.com/jasonkradams/bedside-reader/internal/library"
@@ -27,6 +28,7 @@ type Renderer struct {
 	// Local state
 	playState player.PlaybackState
 	menuState bus.MenuState
+	scrubMode bool
 }
 
 func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
@@ -116,40 +118,66 @@ func (r *Renderer) render() {
 }
 
 func (r *Renderer) renderMenu() {
-	addLabel(r.canvas, 10, 30, "Select Audiobook:", color.RGBA{255, 255, 255, 255})
+	// Draw opaque background over part of the screen
+	draw.Draw(r.canvas, image.Rect(0, 30, 320, 240), &image.Uniform{color.RGBA{0, 0, 0, 230}}, image.Point{}, draw.Src)
+	addLabel(r.canvas, 10, 50, "Library Menu", color.RGBA{200, 255, 200, 255})
 
 	books, ok := r.menuState.Books.([]library.Audiobook)
-	if !ok || len(books) == 0 {
-		addLabel(r.canvas, 10, 70, "(No audiobooks found)", color.RGBA{150, 150, 150, 255})
-		return
+	if !ok {
+		books = []library.Audiobook{}
 	}
 
-	startY := 70
-	for i, book := range books {
-		// Only draw a window of 5 books around the selection
-		if i < r.menuState.Index-2 || i > r.menuState.Index+2 {
-			continue
+	// Figure out scroll offset to keep selected item on screen
+	// Menu Index 0 is Settings. Books are 1..N
+	scrollStart := 0
+	if r.menuState.Index > 5 {
+		scrollStart = r.menuState.Index - 5
+	}
+
+	y := 70
+
+	// Render Settings Item
+	if scrollStart == 0 {
+		c := color.RGBA{200, 200, 200, 255}
+		prefix := "  "
+		if r.menuState.Index == 0 {
+			c = color.RGBA{255, 255, 50, 255}
+			prefix = "> "
 		}
+		_, _, timeout, _ := r.lib.GetSystemState()
+		timeoutStr := "Off"
+		if timeout > 0 {
+			timeoutStr = fmt.Sprintf("%dm", timeout)
+		}
+		addLabel(r.canvas, 10, y, fmt.Sprintf("%sSettings: Screen Timeout [%s]", prefix, timeoutStr), c)
+		y += 25
+	}
 
-		y := startY + ((i - r.menuState.Index + 2) * 30)
-
-		title := book.Title
+	// Render Books
+	for i := scrollStart; i < len(books); i++ {
+		if y > 220 {
+			break // off screen
+		}
+		b := books[i]
+		title := b.Title
 		if title == "" {
-			title = book.FilePath
+			title = filepath.Base(b.FilePath)
 		}
-		if len(title) > 30 {
-			title = title[:27] + "..."
-		}
-
-		col := color.RGBA{150, 150, 150, 255} // Unselected
-		if i == r.menuState.Index {
-			col = color.RGBA{100, 255, 100, 255} // Highlighted
-			title = "> " + title
-		} else {
-			title = "  " + title
+		if len(title) > 28 {
+			title = title[:25] + "..."
 		}
 
-		addLabel(r.canvas, 10, y, title, col)
+		c := color.RGBA{200, 200, 200, 255}
+		prefix := "  "
+		if i+1 == r.menuState.Index {
+			c = color.RGBA{255, 255, 255, 255}
+			prefix = "> "
+		} else if filepath.Base(b.FilePath) == filepath.Base(r.playState.FilePath) {
+			c = color.RGBA{150, 200, 255, 255}
+			prefix = "* "
+		}
+		addLabel(r.canvas, 10, y, prefix+title, c)
+		y += 25
 	}
 }
 
@@ -209,7 +237,12 @@ func (r *Renderer) renderPlayer() {
 	} else if !r.playState.Paused {
 		status = "Playing"
 	}
-	status = fmt.Sprintf("%s  |  Vol: %d%%", status, int(r.playState.Volume))
+
+	if r.scrubMode {
+		status = fmt.Sprintf("%s  |  Mode: Scrub", status)
+	} else {
+		status = fmt.Sprintf("%s  |  Vol: %d%%", status, int(r.playState.Volume))
+	}
 	addLabel(r.canvas, 10, 110, status, color.RGBA{150, 255, 150, 255})
 
 	// 6. Draw Chapter Progress Bar
@@ -265,27 +298,35 @@ func addLabel(img *image.RGBA, x, y int, label string, col color.RGBA) {
 	d.DrawString(label)
 }
 
-func copyToRGB565(fb []byte, img *image.RGBA) {
-	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
+// copyToRGB565 converts the RGBA canvas to RGB565 and writes it to the mmap.
+func copyToRGB565(dst []byte, src *image.RGBA) {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	offset := 0
+	for y := 0; y < h; y++ {
+		srcOffset := src.PixOffset(0, y)
+		for x := 0; x < w; x++ {
+			r := src.Pix[srcOffset]
+			g := src.Pix[srcOffset+1]
+			b := src.Pix[srcOffset+2]
+			srcOffset += 4
 
-	i := 0
-	for y := range height {
-		for x := range width {
-			c := img.RGBAAt(x, y)
+			// RGB565 encoding
+			r5 := uint16(r) >> 3
+			g6 := uint16(g) >> 2
+			b5 := uint16(b) >> 3
+			rgb565 := (r5 << 11) | (g6 << 5) | b5
 
-			// RGB565 conversion
-			r := uint16(c.R) >> 3
-			g := uint16(c.G) >> 2
-			b := uint16(c.B) >> 3
-
-			rgb565 := (r << 11) | (g << 5) | b
-
-			// Little Endian layout
-			fb[i] = byte(rgb565)
-			fb[i+1] = byte(rgb565 >> 8)
-			i += 2
+			// Little-endian order for the framebuffer
+			dst[offset] = byte(rgb565)
+			dst[offset+1] = byte(rgb565 >> 8)
+			offset += 2
 		}
 	}
+}
+
+// SetScrubMode updates the scrub mode toggle for the UI
+func (r *Renderer) SetScrubMode(scrub bool) {
+	r.scrubMode = scrub
+	r.render()
 }

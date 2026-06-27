@@ -297,28 +297,30 @@ func (m *Manager) GetProgress(filename string) (float64, error) {
 	return position, err
 }
 
-// SaveSystemState saves the last active file and whether it was playing
-func (m *Manager) SaveSystemState(activeFile string, playing bool) error {
+// SaveSystemState saves the last active file, whether it was playing, and the screen timeout setting in minutes
+func (m *Manager) SaveSystemState(activeFile string, playing bool, timeout int) error {
 	return m.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketSystem)
-		state := map[string]interface{}{
+		state := map[string]any{
 			"activeFile": activeFile,
 			"playing":    playing,
+			"timeout":    timeout,
 		}
 		data, _ := json.Marshal(state)
 		return b.Put([]byte("system_state"), data)
 	})
 }
 
-// GetSystemState retrieves the last active file and whether it was playing
-func (m *Manager) GetSystemState() (string, bool, error) {
+// GetSystemState retrieves the last active file, playing state, and timeout setting
+func (m *Manager) GetSystemState() (string, bool, int, error) {
 	var activeFile string
 	var playing bool
+	timeout := 5 // Default to 5 minutes
 	err := m.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketSystem)
 		val := b.Get([]byte("system_state"))
 		if val != nil {
-			var state map[string]interface{}
+			var state map[string]any
 			if err := json.Unmarshal(val, &state); err == nil {
 				if af, ok := state["activeFile"].(string); ok {
 					activeFile = af
@@ -326,9 +328,13 @@ func (m *Manager) GetSystemState() (string, bool, error) {
 				if pl, ok := state["playing"].(bool); ok {
 					playing = pl
 				}
+				// json decodes numbers to float64
+				if tm, ok := state["timeout"].(float64); ok {
+					timeout = int(tm)
+				}
 			}
 		}
 		return nil
 	})
-	return activeFile, playing, err
+	return activeFile, playing, timeout, err
 }
