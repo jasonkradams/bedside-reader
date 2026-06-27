@@ -250,6 +250,7 @@ Two HATs cohabit cleanly: the Display HAT Mini (SPI + button pins) and the MAX98
 | GPIO24            | 18   | **Display HAT Mini: Button Y**              | Map to Skip+30.                                                          |
 | GPIO25            | 22   | **Display HAT Mini: Reset**                 | ST7789 reset line.                                                       |
 | GND               | 25   | **Display HAT Mini: SPI Ground**            | **CRITICAL** for 60MHz SPI return path; must connect.                    |
+| GPIO26            | 37   | **MAX98357A: SD / SD_MODE**                 | Hardware Mute (Low = Mute, High = Awake). Eliminates I2S pops.           |
 | GPIO27            | 13   | **Display HAT Mini: RGB LED (one channel)** | Multi-channel LED via PWM on shared pins; details in Pimoroni schematic. |
 
 ### 4.2 Wiring diagram
@@ -281,7 +282,7 @@ Encoder B   (GPIO 22)  [15]  [16]  (GPIO 23) ---> Encoder (SW+ / Push)
 [HAT Button B]         [31]  [32]  (GPIO 12)
 [HAT Backlight]        [33]  [34]  GND
 MAX98357A (LRC) <---   [35]  [36]  (GPIO 16) [HAT Button X]
-             (GPIO 26) [37]  [38]  (GPIO 20)
+    MAX98357A (SD) <-- [37]  [38]  (GPIO 20)
                   GND  [39]  [40]  (GPIO 21) ---> MAX98357A (DIN)
 
                            [micro-SD side]
@@ -292,7 +293,7 @@ MAX98357A breakout wiring:
   BCLK   --> GPIO18 (PCM_CLK,  physical pin 12)
   DIN    --> GPIO21 (PCM_DOUT, physical pin 40)
   GAIN   --> leave floating (default 9dB)
-  SD     --> leave floating (always-on; do NOT tie to GND or amp mutes)
+  SD     --> GPIO26 (BCM, phys 37). Used for hardware mute (Low = mute, High = wake).
   GND    --> Pi GND (header pin 6, 9, 14, ...)
   Vin    --> Pi 5V  (header pin 2 or 4)
   + / -  --> CE32A-4 speaker terminals
