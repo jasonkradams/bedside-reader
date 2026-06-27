@@ -243,3 +243,28 @@ func (m *Manager) GetAll() ([]Audiobook, error) {
 	})
 	return books, err
 }
+
+// GetByFilename finds an audiobook by its base filename
+func (m *Manager) GetByFilename(filename string) (*Audiobook, error) {
+	var found *Audiobook
+	err := m.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketLibrary)
+		return b.ForEach(func(k, v []byte) error {
+			var book Audiobook
+			if err := json.Unmarshal(v, &book); err != nil {
+				return err
+			}
+			if filepath.Base(book.FilePath) == filename {
+				found = &book
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if found == nil {
+		return nil, fmt.Errorf("book not found")
+	}
+	return found, nil
+}

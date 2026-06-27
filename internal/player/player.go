@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
+	"github.com/jasonkradams/bedside-reader/internal/library"
 )
 
 const ipcSocket = "/var/lib/bedside/mpv.sock"
@@ -18,10 +19,11 @@ const ipcSocket = "/var/lib/bedside/mpv.sock"
 // Player controls the mpv subprocess and exposes playback controls
 type Player struct {
 	bus      *bus.Bus
+	lib      *library.Manager
 	cmd      *exec.Cmd
 	conn     net.Conn
-	reqID       int
-	reqMutex    sync.Mutex
+	reqID    int
+	reqMutex sync.Mutex
 	currentPath string
 
 	State PlaybackState
@@ -37,9 +39,10 @@ type PlaybackState struct {
 }
 
 // New starts the mpv subprocess and connects to its IPC socket
-func New(eventBus *bus.Bus) (*Player, error) {
+func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
 	p := &Player{
 		bus:   eventBus,
+		lib:   lib,
 		State: PlaybackState{Volume: 50, Paused: true},
 	}
 
@@ -211,9 +214,36 @@ func (p *Player) SkipChapter(delta int) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
 	
-	// If paused, we can't cleanly skip chapters without parsing the DB ourselves.
-	// For now, only allow chapter skips while playing.
 	if p.State.Paused {
+		// If paused, we manually calculate the target chapter start time from the DB
+		if p.State.FilePath == "" {
+			return nil
+		}
+		book, err := p.lib.GetByFilename(p.State.FilePath)
+		if err != nil || len(book.Chapters) == 0 {
+			return nil
+		}
+
+		// Find current chapter index based on position
+		currentIdx := 0
+		for i, chap := range book.Chapters {
+			// Add a small epsilon (0.5s) to avoid getting stuck on the boundary
+			if p.State.Position >= chap.StartTime-0.5 {
+				currentIdx = i
+			} else {
+				break
+			}
+		}
+
+		targetIdx := currentIdx + delta
+		if targetIdx < 0 {
+			targetIdx = 0
+		} else if targetIdx >= len(book.Chapters) {
+			targetIdx = len(book.Chapters) - 1
+		}
+
+		p.State.Position = book.Chapters[targetIdx].StartTime
+		p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 		return nil
 	}
 

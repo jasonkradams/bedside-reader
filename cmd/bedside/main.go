@@ -42,7 +42,7 @@ func main() {
 	}
 
 	// 5. Start the Audio Player (mpv)
-	mpv, err := player.New(eventBus)
+	mpv, err := player.New(eventBus, lib)
 	if err != nil {
 		log.Fatalf("Failed to start player: %v", err)
 	}
