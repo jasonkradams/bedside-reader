@@ -55,6 +55,7 @@ func main() {
 		inMenu := false
 		menuIndex := 0
 		var menuBooks []library.Audiobook
+		scrubMode := false // Toggle for encoder behavior
 
 		publishMenu := func() {
 			eventBus.Publish(bus.EventMenuUpdate, bus.MenuState{
@@ -114,6 +115,37 @@ func main() {
 					}
 				}
 				publishMenu()
+			case bus.EventEncoderBtn:
+				log.Println("Received EventEncoderBtn")
+				scrubMode = !scrubMode
+				if scrubMode {
+					log.Println("Encoder Mode: Scrubbing")
+				} else {
+					log.Println("Encoder Mode: Volume")
+				}
+			case bus.EventEncoderTurn:
+				delta, ok := ev.Payload.(int)
+				if ok {
+					if inMenu {
+						// Scroll menu!
+						if delta > 0 && menuIndex < len(menuBooks)-1 {
+							menuIndex++
+							publishMenu()
+						} else if delta < 0 && menuIndex > 0 {
+							menuIndex--
+							publishMenu()
+						}
+					} else {
+						if scrubMode {
+							// Scrub by 15 seconds per click
+							mpv.Seek(float64(delta * 15))
+						} else {
+							// Adjust Volume!
+							newVol := mpv.State.Volume + float64(delta*5)
+							mpv.SetVolume(newVol)
+						}
+					}
+				}
 			case bus.EventLibraryScanComplete:
 				log.Println("Received EventLibraryScanComplete")
 				// We no longer auto-play the first book on scan complete!

@@ -49,10 +49,52 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 		go m.watchButton(pin, b.Event)
 	}
 
-	// Note: We skip the rotary encoder (GPIO 17, 22, 23) for now 
-	// until the hardware is wired up with a breadboard.
+	// Start Rotary Encoder (GPIO 17, 22, 23)
+	pinA := gpioreg.ByName("GPIO17")
+	pinB := gpioreg.ByName("GPIO22")
+	pinBtn := gpioreg.ByName("GPIO23")
+	
+	if pinA != nil && pinB != nil && pinBtn != nil {
+		pinA.In(gpio.PullUp, gpio.NoEdge)
+		pinB.In(gpio.PullUp, gpio.NoEdge)
+		pinBtn.In(gpio.PullUp, gpio.NoEdge)
+		
+		go m.watchEncoder(pinA, pinB)
+		go m.watchButton(pinBtn, bus.EventEncoderBtn)
+	} else {
+		log.Println("Warning: Failed to find Rotary Encoder pins")
+	}
 
 	return m, nil
+}
+
+func (m *InputManager) watchEncoder(pinA, pinB gpio.PinIO) {
+	// Simple quadrature decoder using polling
+	lastA := pinA.Read()
+	lastB := pinB.Read()
+	
+	for {
+		time.Sleep(2 * time.Millisecond) // Fast 2ms polling loop for accurate quadrature
+		
+		a := pinA.Read()
+		b := pinB.Read()
+		
+		if a != lastA || b != lastB {
+			// If state changed
+			if a == gpio.Low && lastA == gpio.High {
+				// Falling edge on A
+				if b == gpio.High {
+					// Clockwise
+					m.bus.Publish(bus.EventEncoderTurn, 1)
+				} else {
+					// Counter-clockwise
+					m.bus.Publish(bus.EventEncoderTurn, -1)
+				}
+			}
+			lastA = a
+			lastB = b
+		}
+	}
 }
 
 func (m *InputManager) watchButton(pin gpio.PinIO, event bus.EventType) {

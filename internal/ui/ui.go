@@ -209,6 +209,7 @@ func (r *Renderer) renderPlayer() {
 	} else if !r.playState.Paused {
 		status = "Playing"
 	}
+	status = fmt.Sprintf("%s  |  Vol: %d%%", status, int(r.playState.Volume))
 	addLabel(r.canvas, 10, 110, status, color.RGBA{150, 255, 150, 255})
 
 	// 6. Draw Chapter Progress Bar

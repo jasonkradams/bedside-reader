@@ -108,6 +108,10 @@ func (p *Player) listen() {
 		if event, ok := msg["event"].(string); ok {
 			if event == "file-loaded" {
 				p.reqMutex.Lock()
+				
+				// Unmute the audio now that the file is fully loaded and ready to play
+				p.sendCommandNoLock("set_property", "mute", false)
+				
 				if p.pendingSeek > 0 {
 					p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
 					p.pendingSeek = 0
@@ -197,6 +201,9 @@ func (p *Player) LoadFile(path string) error {
 		p.State.Position = 0
 		p.pendingSeek = 0
 	}
+	
+	// 5. Mute output instantly to hide transition buzzing, will unmute on file-loaded
+	p.sendCommand("set_property", "mute", true)
 	
 	p.State.Paused = false
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)

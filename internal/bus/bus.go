@@ -9,6 +9,8 @@ const (
 	EventButtonMenu      EventType = "input.button.menu"
 	EventButtonSkipFwd   EventType = "input.button.skip_fwd"
 	EventButtonSkipBack  EventType = "input.button.skip_back"
+	EventEncoderTurn     EventType = "input.encoder.turn"
+	EventEncoderBtn      EventType = "input.encoder.btn"
 
 	// Player Events
 	EventPlayerStateChanged   EventType = "player.state_changed"
