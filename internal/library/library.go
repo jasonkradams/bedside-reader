@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go.etcd.io/bbolt"
 	"github.com/jasonkradams/bedside-reader/internal/bus"
+	"go.etcd.io/bbolt"
 )
 
 var (
@@ -24,13 +24,13 @@ var (
 
 // Audiobook represents the parsed metadata of a single file
 type Audiobook struct {
-	ID         string    `json:"id"`
-	FilePath   string    `json:"file_path"`
-	Title      string    `json:"title"`
-	Author     string    `json:"author"`
-	Duration   float64   `json:"duration"`
-	CoverHash  string    `json:"cover_hash"` // used to locate cover art image
-	Chapters   []Chapter `json:"chapters"`
+	ID        string    `json:"id"`
+	FilePath  string    `json:"file_path"`
+	Title     string    `json:"title"`
+	Author    string    `json:"author"`
+	Duration  float64   `json:"duration"`
+	CoverHash string    `json:"cover_hash"` // used to locate cover art image
+	Chapters  []Chapter `json:"chapters"`
 }
 
 // Chapter represents a single chapter in an audiobook
@@ -105,8 +105,8 @@ func (m *Manager) listenProgress() {
 		if ev.Type == bus.EventPlayerProgressTick {
 			// Save progress occasionally or on pause/stop?
 			// For a Pi Zero 2 with an SD card, we probably shouldn't fsync 1Hz ticks.
-			// The architecture doc says: "written every SSE tick (~1Hz)". 
-			// We will write it but maybe batch it if IO is an issue. 
+			// The architecture doc says: "written every SSE tick (~1Hz)".
+			// We will write it but maybe batch it if IO is an issue.
 			// For now, write synchronously.
 			// TODO: Actually parse Payload and save.
 		}

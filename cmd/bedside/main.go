@@ -115,7 +115,7 @@ func main() {
 				inMenu = !inMenu
 				if inMenu {
 					menuBooks, _ = lib.GetAll()
-					
+
 					// Find the currently playing book to set the cursor
 					currentPath := mpv.State.FilePath
 					menuIndex = 0

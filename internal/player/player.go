@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"github.com/jasonkradams/bedside-reader/internal/library"
+	"periph.io/x/conn/v3/gpio"
+	"periph.io/x/conn/v3/gpio/gpioreg"
 )
 
 const ipcSocket = "/var/lib/bedside/mpv.sock"
@@ -28,6 +31,8 @@ type Player struct {
 	pendingSeek float64
 	lastSave    time.Time
 
+	mutePin gpio.PinOut
+
 	State PlaybackState
 }
 
@@ -42,10 +47,19 @@ type PlaybackState struct {
 
 // New starts the mpv subprocess and connects to its IPC socket
 func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
+	os.Remove(ipcSocket)
+
+	pin := gpioreg.ByName("GPIO26")
+	if pin != nil {
+		pin.Out(gpio.Low) // Start muted
+	}
+
 	p := &Player{
-		bus:   eventBus,
-		lib:   lib,
-		State: PlaybackState{Volume: 50, Paused: true},
+		bus:         eventBus,
+		lib:         lib,
+		currentPath: "",
+		mutePin:     pin,
+		State:       PlaybackState{Volume: 50, Paused: true},
 	}
 
 	// Start mpv as a background daemon
@@ -108,10 +122,13 @@ func (p *Player) listen() {
 		if event, ok := msg["event"].(string); ok {
 			if event == "file-loaded" {
 				p.reqMutex.Lock()
-				
+
 				// Unmute the audio now that the file is fully loaded and ready to play
 				p.sendCommandNoLock("set_property", "mute", false)
-				
+				if p.mutePin != nil {
+					p.mutePin.Out(gpio.High) // Hardware Unmute
+				}
+
 				if p.pendingSeek > 0 {
 					p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
 					p.pendingSeek = 0
@@ -195,7 +212,7 @@ func (p *Player) LoadFile(path string) error {
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
 	p.lib.SaveSystemState(path, true)
-	
+
 	// 4. Load saved progress for the NEW file
 	if pos, err := p.lib.GetProgress(p.State.FilePath); err == nil && pos > 0 {
 		p.State.Position = pos
@@ -204,10 +221,13 @@ func (p *Player) LoadFile(path string) error {
 		p.State.Position = 0
 		p.pendingSeek = 0
 	}
-	
+
 	// 5. Mute output instantly to hide transition buzzing, will unmute on file-loaded
 	p.sendCommand("set_property", "mute", true)
-	
+	if p.mutePin != nil {
+		p.mutePin.Out(gpio.Low) // Hardware Mute
+	}
+
 	p.State.Paused = false
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 	return p.sendCommand("loadfile", path, "replace")
@@ -224,12 +244,19 @@ func (p *Player) TogglePause() error {
 		p.lib.SaveSystemState(p.currentPath, true)
 		p.pendingSeek = p.State.Position
 		p.sendCommandNoLock("loadfile", p.currentPath, "replace")
+		// (Unmuting will happen via the file-loaded event)
 	} else {
 		// Deep sleep pause (closes ALSA device and kills DAC noise)
 		p.State.Paused = true
 		p.lib.SaveSystemState(p.currentPath, false)
+
+		if p.mutePin != nil {
+			p.mutePin.Out(gpio.Low)           // Hardware Mute
+			time.Sleep(50 * time.Millisecond) // Give amp time to shutdown before we stop BCLK
+		}
+
 		p.sendCommandNoLock("stop")
-		
+
 		// Immediately save progress to disk
 		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 	}

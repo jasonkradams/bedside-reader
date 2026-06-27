@@ -117,22 +117,22 @@ func (r *Renderer) render() {
 
 func (r *Renderer) renderMenu() {
 	addLabel(r.canvas, 10, 30, "Select Audiobook:", color.RGBA{255, 255, 255, 255})
-	
+
 	books, ok := r.menuState.Books.([]library.Audiobook)
 	if !ok || len(books) == 0 {
 		addLabel(r.canvas, 10, 70, "(No audiobooks found)", color.RGBA{150, 150, 150, 255})
 		return
 	}
-	
+
 	startY := 70
 	for i, book := range books {
 		// Only draw a window of 5 books around the selection
 		if i < r.menuState.Index-2 || i > r.menuState.Index+2 {
 			continue
 		}
-		
+
 		y := startY + ((i - r.menuState.Index + 2) * 30)
-		
+
 		title := book.Title
 		if title == "" {
 			title = book.FilePath
@@ -140,7 +140,7 @@ func (r *Renderer) renderMenu() {
 		if len(title) > 30 {
 			title = title[:27] + "..."
 		}
-		
+
 		col := color.RGBA{150, 150, 150, 255} // Unselected
 		if i == r.menuState.Index {
 			col = color.RGBA{100, 255, 100, 255} // Highlighted
@@ -148,7 +148,7 @@ func (r *Renderer) renderMenu() {
 		} else {
 			title = "  " + title
 		}
-		
+
 		addLabel(r.canvas, 10, y, title, col)
 	}
 }
@@ -164,7 +164,7 @@ func (r *Renderer) renderPlayer() {
 		b, err := r.lib.GetByFilename(r.playState.FilePath)
 		if err == nil {
 			book = b
-			
+
 			// Find current chapter
 			for i, chap := range book.Chapters {
 				if r.playState.Position >= chap.StartTime-0.5 {
@@ -187,7 +187,7 @@ func (r *Renderer) renderPlayer() {
 	} else if book != nil && book.Title != "" {
 		title = book.Title
 	}
-	
+
 	// Truncate long titles loosely
 	if len(title) > 35 {
 		title = title[:32] + "..."
@@ -225,7 +225,7 @@ func (r *Renderer) renderPlayer() {
 			}
 			barWidth := 300
 			filled := int(float64(barWidth) * pct)
-			
+
 			// Bar outline
 			draw.Draw(r.canvas, image.Rect(10, 150, 10+barWidth, 160), &image.Uniform{color.RGBA{100, 100, 100, 255}}, image.Point{}, draw.Src)
 			// Bar fill
@@ -238,7 +238,7 @@ func (r *Renderer) renderPlayer() {
 		// Chapter time
 		chapDur := chapterEnd - chapterStart
 		chapPos := r.playState.Position - chapterStart
-		
+
 		chapTimeStr := fmt.Sprintf("Chap: %02d:%02d / %02d:%02d",
 			int(chapPos)/60, int(chapPos)%60,
 			int(chapDur)/60, int(chapDur)%60,

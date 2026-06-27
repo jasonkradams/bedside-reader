@@ -53,12 +53,12 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 	pinA := gpioreg.ByName("GPIO17")
 	pinB := gpioreg.ByName("GPIO22")
 	pinBtn := gpioreg.ByName("GPIO23")
-	
+
 	if pinA != nil && pinB != nil && pinBtn != nil {
 		pinA.In(gpio.PullUp, gpio.NoEdge)
 		pinB.In(gpio.PullUp, gpio.NoEdge)
 		pinBtn.In(gpio.PullUp, gpio.NoEdge)
-		
+
 		go m.watchEncoder(pinA, pinB)
 		go m.watchButton(pinBtn, bus.EventEncoderBtn)
 	} else {
@@ -72,13 +72,13 @@ func (m *InputManager) watchEncoder(pinA, pinB gpio.PinIO) {
 	// Simple quadrature decoder using polling
 	lastA := pinA.Read()
 	lastB := pinB.Read()
-	
+
 	for {
 		time.Sleep(2 * time.Millisecond) // Fast 2ms polling loop for accurate quadrature
-		
+
 		a := pinA.Read()
 		b := pinB.Read()
-		
+
 		if a != lastA || b != lastB {
 			// If state changed
 			if a == gpio.Low && lastA == gpio.High {
