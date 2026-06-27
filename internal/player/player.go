@@ -276,6 +276,7 @@ func (p *Player) LoadFile(path string) error {
 
 	p.State.Paused = false
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+	p.sendCommand("set_property", "pause", false)
 	return p.sendCommand("loadfile", path, "replace")
 }
 

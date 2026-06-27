@@ -110,7 +110,16 @@ func main() {
 				if resetScreen(true) {
 					continue
 				}
-				mpv.TogglePause()
+				if inMenu {
+					if menuIndex > 0 && menuIndex-1 < len(menuBooks) {
+						b := menuBooks[menuIndex-1]
+						mpv.LoadFile(b.FilePath)
+						inMenu = false
+						publishMenu() // Close menu
+					}
+				} else {
+					mpv.TogglePause()
+				}
 			case "encoder-single-click":
 				// Edge case: single click does not wake screen, so it doesn't matter if it's off.
 				// However, you said if screen is off, turning or clicking should just do it without waking.
