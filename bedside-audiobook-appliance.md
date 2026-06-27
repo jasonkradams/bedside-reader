@@ -260,7 +260,7 @@ Here is the exact mapping of the 40-pin header to the external components:
 ```text
                      Raspberry Pi 40-Pin Header
                              (Top View)
-                           [micro-SD side]
+                           [USB / HDMI side]
       
                 +3.3V  [ 1]  [ 2]  5V ----------> MAX98357A (Vin)
          SDA (GPIO 2)  [ 3]  [ 4]  5V 
@@ -272,9 +272,9 @@ Encoder A   (GPIO 17)  [11]  [12]  (GPIO 18) ---> MAX98357A (BCLK)
 Encoder B   (GPIO 22)  [15]  [16]  (GPIO 23) ---> Encoder (SW+ / Push)
                  3.3V  [17]  [18]  (GPIO 24) [HAT Button Y]
        [HAT SPI MOSI]  [19]  [20]  GND ---------> Encoder (SW- / Push GND)
-       [HAT SPI DC]    [21]  [22]  (GPIO 25) [HAT Reset]
-       [HAT SPI SCLK]  [23]  [24]  (GPIO 8)  [HAT SPI CE0]
-                  GND  [25]  [26]  (GPIO 7)
+       [HAT SPI DC]    [21]  [22]  (GPIO 25)
+       [HAT SPI SCLK]  [23]  [24]  (GPIO 8)  
+                  GND  [25]  [26]  (GPIO 7)  [HAT SPI CE1]
                 ID_SD  [27]  [28]  ID_SC
 [HAT Button A]         [29]  [30]  GND
 [HAT Button B]         [31]  [32]  (GPIO 12)
@@ -283,7 +283,7 @@ MAX98357A (LRC) <---   [35]  [36]  (GPIO 16) [HAT Button X]
              (GPIO 26) [37]  [38]  (GPIO 20)
                   GND  [39]  [40]  (GPIO 21) ---> MAX98357A (DIN)
 
-                         [USB / HDMI side]
+                           [micro-SD side]
 ```
 
 MAX98357A breakout wiring:

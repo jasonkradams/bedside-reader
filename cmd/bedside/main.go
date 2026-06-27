@@ -1,82 +1,50 @@
 package main
 
 import (
+	"image"
+	"image/color"
+	"image/draw"
 	"log"
-	"net"
-	"net/http"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/coreos/go-systemd/v22/daemon"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/math/fixed"
+	"golang.org/x/sys/unix"
 )
 
 func main() {
-	log.Println("Starting Bedside Audiobook Appliance...")
+	log.Println("Starting Bedside Audiobook Appliance (Native Framebuffer Mode)...")
 
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		html := `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Bedside</title>
-	<style>
-		body {
-			margin: 0;
-			padding: 0;
-			background-color: #0000aa; /* Blue background to confirm rendering */
-			color: #fff;
-			font-family: sans-serif;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			height: 100vh;
-			width: 100vw;
-			cursor: none !important; /* Hide the Wayland cursor */
-		}
-		h1 {
-			font-size: 32px;
-			font-weight: bold;
-			text-align: center;
-		}
-	</style>
-</head>
-<body>
-	<h1 id="title">Loading...</h1>
-	<script>
-		// WPEWebKit under Cage has a known race condition where if the page loads 
-		// instantly (like from localhost), it paints before Wayland sends the 
-		// initial surface configure event, resulting in a blank screen.
-		// We force a repaint after 1 second to ensure it draws at the correct resolution.
-		setTimeout(() => {
-			document.body.style.backgroundColor = '#005500'; // Dark Green
-			document.getElementById('title').innerText = 'Bedside Reader Online';
-		}, 1000);
-	</script>
-</body>
-</html>
-`
-		w.Write([]byte(html))
-	})
-
-	server := &http.Server{
-		Addr:         ":8080",
-		Handler:      nil,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
-
-	ln, err := net.Listen("tcp", ":8080")
+	// Open the framebuffer device
+	fbFile, err := os.OpenFile("/dev/fb1", os.O_RDWR, 0)
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		log.Fatalf("Failed to open /dev/fb1: %v", err)
 	}
+	defer fbFile.Close()
 
-	log.Println("Listening on :8080...")
+	// Memory map the framebuffer (320x240, 16-bit color = 153600 bytes)
+	fbSize := 320 * 240 * 2
+	mmap, err := unix.Mmap(int(fbFile.Fd()), 0, fbSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	if err != nil {
+		log.Fatalf("Failed to mmap framebuffer: %v", err)
+	}
+	defer unix.Munmap(mmap)
+
+	// Create an in-memory canvas
+	canvas := image.NewRGBA(image.Rect(0, 0, 320, 240))
+
+	// Draw a dark blue background
+	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{color.RGBA{0, 0, 50, 255}}, image.Point{}, draw.Src)
+
+	// Draw text
+	addLabel(canvas, 100, 120, "Bedside Native UI", color.RGBA{255, 255, 255, 255})
+
+	// Copy the canvas to the framebuffer
+	copyToRGB565(mmap, canvas)
 
 	// Notify systemd that the service is ready
 	sent, err := daemon.SdNotify(false, daemon.SdNotifyReady)
@@ -86,7 +54,46 @@ func main() {
 		log.Println("Systemd notified of readiness.")
 	}
 
-	if err := server.Serve(ln); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	// Wait for termination signal
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+
+	log.Println("Shutting down Bedside...")
+}
+
+func addLabel(img *image.RGBA, x, y int, label string, col color.RGBA) {
+	point := fixed.Point26_6{X: fixed.I(x), Y: fixed.I(y)}
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(col),
+		Face: basicfont.Face7x13,
+		Dot:  point,
+	}
+	d.DrawString(label)
+}
+
+func copyToRGB565(fb []byte, img *image.RGBA) {
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	
+	i := 0
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			c := img.RGBAAt(x, y)
+			
+			// RGB565 conversion
+			r := uint16(c.R) >> 3
+			g := uint16(c.G) >> 2
+			b := uint16(c.B) >> 3
+			
+			rgb565 := (r << 11) | (g << 5) | b
+			
+			// Little Endian layout
+			fb[i] = byte(rgb565)
+			fb[i+1] = byte(rgb565 >> 8)
+			i += 2
+		}
 	}
 }

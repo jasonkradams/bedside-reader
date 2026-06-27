@@ -5,13 +5,8 @@ hostname: bedside-reader
 manage_etc_hosts: true
 packages:
   - avahi-daemon
-  - cog
-  - cage
-  - libwpebackend-fdo-1.0-1
-  - libwpewebkit-1.1-0
   - mpv
   - libmpv2
-  - fonts-inter
   - libasound2
   - alsa-utils
   - network-manager
@@ -72,38 +67,6 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
-  - path: /etc/systemd/system/cog.service
-    owner: root:root
-    permissions: '0644'
-    content: |
-      [Unit]
-      Description=Bedside Kiosk (Cog on KMS/DRM)
-      After=bedside.service systemd-user-sessions.service
-      Requires=bedside.service
-  - path: /etc/systemd/system/kiosk.service
-    owner: root:root
-    permissions: '0644'
-    content: |
-      [Unit]
-      Description=Bedside Kiosk (Cage)
-      After=network-online.target systemd-user-sessions.service bedside.service
-
-      [Service]
-      User=root
-      Environment=WLR_DRM_DEVICES=/dev/dri/card0
-      Environment=WLR_DRM_NO_MODIFIERS=1
-      Environment=XCURSOR_SIZE=0
-      Environment=WLR_LIBINPUT_NO_DEVICES=1
-      Environment=XDG_RUNTIME_DIR=/run/user/0
-      ExecStartPre=/usr/bin/mkdir -p /run/user/0
-      ExecStartPre=/usr/bin/chmod 700 /run/user/0
-      ExecStartPre=/usr/bin/sh -c 'until curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'
-      ExecStart=/usr/bin/cage -s -d -m drm -- /usr/bin/cog -P wl --bg-color=000000 http://localhost:8080
-      Restart=always
-      RestartSec=5
-
-      [Install]
-      WantedBy=multi-user.target
 
   - path: /etc/samba/smb.conf
     owner: root:root
@@ -134,7 +97,6 @@ runcmd:
   - [ udevadm, trigger ]
   - [ systemctl, daemon-reload ]
   - [ systemctl, enable, bedside.service ]
-  - [ systemctl, enable, kiosk.service ]
   - [ cp, /boot/firmware/panel.bin, /lib/firmware/panel.bin ]
   - [ mkdir, -p, /var/lib/bedside/audiobooks ]
   - [ chown, -R, "bedside:bedside", /var/lib/bedside ]
