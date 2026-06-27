@@ -49,6 +49,18 @@ func main() {
 	}
 	defer mpv.Close()
 
+	// Resume System State!
+	activePath, playing, err := lib.GetSystemState()
+	if err == nil && activePath != "" {
+		log.Printf("Resuming state: %s (Playing: %v)", activePath, playing)
+		mpv.LoadFile(activePath)
+		if !playing {
+			mpv.TogglePause() // LoadFile automatically plays, so pause if it wasn't playing
+		}
+	} else {
+		log.Println("No saved system state, idling.")
+	}
+
 	// 6. Connect Input to Player logic
 	ch := eventBus.Subscribe()
 	go func() {

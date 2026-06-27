@@ -19,6 +19,7 @@ import (
 var (
 	bucketLibrary  = []byte("library")
 	bucketProgress = []byte("progress")
+	bucketSystem   = []byte("system")
 )
 
 // Audiobook represents the parsed metadata of a single file
@@ -75,6 +76,10 @@ func New(eventBus *bus.Bus, dbPath, audioDir, coverDir string) (*Manager, error)
 			return err
 		}
 		_, err = tx.CreateBucketIfNotExists(bucketProgress)
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(bucketSystem)
 		return err
 	})
 	if err != nil {
@@ -290,4 +295,40 @@ func (m *Manager) GetProgress(filename string) (float64, error) {
 		return nil
 	})
 	return position, err
+}
+
+// SaveSystemState saves the last active file and whether it was playing
+func (m *Manager) SaveSystemState(activeFile string, playing bool) error {
+	return m.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketSystem)
+		state := map[string]interface{}{
+			"activeFile": activeFile,
+			"playing":    playing,
+		}
+		data, _ := json.Marshal(state)
+		return b.Put([]byte("system_state"), data)
+	})
+}
+
+// GetSystemState retrieves the last active file and whether it was playing
+func (m *Manager) GetSystemState() (string, bool, error) {
+	var activeFile string
+	var playing bool
+	err := m.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketSystem)
+		val := b.Get([]byte("system_state"))
+		if val != nil {
+			var state map[string]interface{}
+			if err := json.Unmarshal(val, &state); err == nil {
+				if af, ok := state["activeFile"].(string); ok {
+					activeFile = af
+				}
+				if pl, ok := state["playing"].(bool); ok {
+					playing = pl
+				}
+			}
+		}
+		return nil
+	})
+	return activeFile, playing, err
 }

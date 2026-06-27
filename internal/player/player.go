@@ -130,6 +130,7 @@ func (p *Player) listen() {
 							p.bus.Publish(bus.EventPlayerProgressTick, p.State)
 							if time.Since(p.lastSave) > 10*time.Second {
 								p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+								p.lib.SaveSystemState(p.currentPath, !p.State.Paused)
 								p.lastSave = time.Now()
 							}
 						}
@@ -187,11 +188,13 @@ func (p *Player) LoadFile(path string) error {
 	// 1. Save progress of CURRENT file before switching
 	if p.State.FilePath != "" && p.State.Position > 0 {
 		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+		p.lib.SaveSystemState(p.currentPath, !p.State.Paused)
 	}
 
 	// 3. Update state for new file
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
+	p.lib.SaveSystemState(path, true)
 	
 	// 4. Load saved progress for the NEW file
 	if pos, err := p.lib.GetProgress(p.State.FilePath); err == nil && pos > 0 {
@@ -218,11 +221,13 @@ func (p *Player) TogglePause() error {
 	if p.State.Paused {
 		// Resume playing
 		p.State.Paused = false
+		p.lib.SaveSystemState(p.currentPath, true)
 		p.pendingSeek = p.State.Position
 		p.sendCommandNoLock("loadfile", p.currentPath, "replace")
 	} else {
 		// Deep sleep pause (closes ALSA device and kills DAC noise)
 		p.State.Paused = true
+		p.lib.SaveSystemState(p.currentPath, false)
 		p.sendCommandNoLock("stop")
 		
 		// Immediately save progress to disk
