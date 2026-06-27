@@ -2,10 +2,8 @@ package player
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +13,7 @@ import (
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 )
 
-const ipcSocket = "/tmp/bedside-mpv.sock"
+const ipcSocket = "/var/lib/bedside/mpv.sock"
 
 // Player controls the mpv subprocess and exposes playback controls
 type Player struct {
@@ -49,6 +47,7 @@ func New(eventBus *bus.Bus) (*Player, error) {
 		"--idle",
 		"--no-video",
 		"--really-quiet",
+		"--no-config",
 		fmt.Sprintf("--input-ipc-server=%s", ipcSocket),
 	)
 
@@ -59,7 +58,7 @@ func New(eventBus *bus.Bus) (*Player, error) {
 	// Wait for the socket to be created
 	var conn net.Conn
 	var err error
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
 		conn, err = net.Dial("unix", ipcSocket)
 		if err == nil {
@@ -91,8 +90,8 @@ func (p *Player) listen() {
 	scanner := bufio.NewScanner(p.conn)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		
-		var msg map[string]interface{}
+
+		var msg map[string]any
 		if err := json.Unmarshal(line, &msg); err != nil {
 			continue
 		}
@@ -134,12 +133,12 @@ func (p *Player) listen() {
 }
 
 // sendCommand sends a JSON IPC command to mpv
-func (p *Player) sendCommand(command ...interface{}) error {
+func (p *Player) sendCommand(command ...any) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
 
 	p.reqID++
-	req := map[string]interface{}{
+	req := map[string]any{
 		"command":    command,
 		"request_id": p.reqID,
 	}
