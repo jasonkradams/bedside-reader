@@ -246,11 +246,15 @@ func (p *Player) TogglePause() error {
 		// Resume playing
 		p.State.Paused = false
 		p.lib.SaveSystemState(p.currentPath, true)
-		if p.mutePin != nil {
-			p.mutePin.Out(gpio.High) // Hardware Unmute
-			time.Sleep(10 * time.Millisecond) // Let click-suppression settle
-		}
 		p.sendCommandNoLock("set_property", "pause", false)
+		
+		if p.mutePin != nil {
+			// Delay hardware unmute to let the BCLK settle (just like loadfile)
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				p.mutePin.Out(gpio.High)
+			}()
+		}
 	} else {
 		// Pause native stream (keeps ALSA open, stopping I2S clock pops!)
 		p.State.Paused = true
