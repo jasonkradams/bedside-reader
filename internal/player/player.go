@@ -43,7 +43,7 @@ type Player struct {
 
 // triggerMute temporarily pulls the hardware mute pin low to mask I2S clock transients
 func (p *Player) triggerMute() {
-	if p.mutePin != nil {
+	if p.mutePin != nil && !p.State.Paused {
 		p.mutePin.Out(gpio.Low)
 		if p.muteTimer != nil {
 			p.muteTimer.Stop()
@@ -139,24 +139,7 @@ func (p *Player) listen() {
 		if event, ok := msg["event"].(string); ok {
 			switch event {
 			case "file-loaded":
-				p.reqMutex.Lock()
-				p.isIdle = false
-
-				// Unmute the audio now that the file is fully loaded and ready to play
-				p.sendCommandNoLock("set_property", "mute", false)
-				if p.mutePin != nil {
-					// Delay unmute to allow ALSA stream to settle (masks the mpv load pop)
-					go func() {
-						time.Sleep(100 * time.Millisecond)
-						p.mutePin.Out(gpio.High) // Hardware Unmute
-					}()
-				}
-
-				if p.pendingSeek > 0 {
-					p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
-					p.pendingSeek = 0
-				}
-				p.reqMutex.Unlock()
+				p.handleFileLoaded()
 			case "end-file":
 				p.reqMutex.Lock()
 				// Only trigger end-file if it actually finished playing naturally
@@ -176,15 +159,13 @@ func (p *Player) listen() {
 				switch name {
 				case "time-pos":
 					if val, ok := data.(float64); ok {
-						if !p.State.Paused {
-							p.State.Position = val
-							p.bus.Publish(bus.EventPlayerProgressTick, p.State)
-							if time.Since(p.lastSave) > 10*time.Second {
-								p.lib.SaveProgress(p.State.FilePath, p.State.Position)
-								_, _, timeout, _ := p.lib.GetSystemState()
-								p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
-								p.lastSave = time.Now()
-							}
+						p.State.Position = val
+						p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+						if time.Since(p.lastSave) > 10*time.Second {
+							p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+							_, _, timeout, _ := p.lib.GetSystemState()
+							p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
+							p.lastSave = time.Now()
 						}
 					}
 				case "duration":
@@ -204,6 +185,27 @@ func (p *Player) listen() {
 				}
 			}
 		}
+	}
+}
+
+func (p *Player) handleFileLoaded() {
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
+	p.isIdle = false
+
+	// Unmute the audio now that the file is fully loaded and ready to play
+	p.sendCommandNoLock("set_property", "mute", false)
+	if p.mutePin != nil && !p.State.Paused {
+		// Delay unmute to allow ALSA stream to settle (masks the mpv load pop)
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			p.mutePin.Out(gpio.High) // Hardware Unmute
+		}()
+	}
+
+	if p.pendingSeek > 0 {
+		p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
+		p.pendingSeek = 0
 	}
 }
 
