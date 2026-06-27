@@ -126,9 +126,13 @@ func (p *Player) listen() {
 				// Unmute the audio now that the file is fully loaded and ready to play
 				p.sendCommandNoLock("set_property", "mute", false)
 				if p.mutePin != nil {
-					p.mutePin.Out(gpio.High) // Hardware Unmute
+					// Delay unmute to allow ALSA stream to settle (masks the mpv load pop)
+					go func() {
+						time.Sleep(100 * time.Millisecond)
+						p.mutePin.Out(gpio.High) // Hardware Unmute
+					}()
 				}
-
+				
 				if p.pendingSeek > 0 {
 					p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
 					p.pendingSeek = 0
@@ -242,21 +246,21 @@ func (p *Player) TogglePause() error {
 		// Resume playing
 		p.State.Paused = false
 		p.lib.SaveSystemState(p.currentPath, true)
-		p.pendingSeek = p.State.Position
-		p.sendCommandNoLock("loadfile", p.currentPath, "replace")
-		// (Unmuting will happen via the file-loaded event)
+		if p.mutePin != nil {
+			p.mutePin.Out(gpio.High) // Hardware Unmute
+			time.Sleep(10 * time.Millisecond) // Let click-suppression settle
+		}
+		p.sendCommandNoLock("set_property", "pause", false)
 	} else {
-		// Deep sleep pause (closes ALSA device and kills DAC noise)
+		// Pause native stream (keeps ALSA open, stopping I2S clock pops!)
 		p.State.Paused = true
 		p.lib.SaveSystemState(p.currentPath, false)
-
+		p.sendCommandNoLock("set_property", "pause", true)
+		
 		if p.mutePin != nil {
-			p.mutePin.Out(gpio.Low)           // Hardware Mute
-			time.Sleep(50 * time.Millisecond) // Give amp time to shutdown before we stop BCLK
+			p.mutePin.Out(gpio.Low) // Hardware Mute (Kills DAC hiss!)
 		}
-
-		p.sendCommandNoLock("stop")
-
+		
 		// Immediately save progress to disk
 		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 	}
