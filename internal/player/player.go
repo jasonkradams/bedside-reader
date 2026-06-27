@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jasonkradams/bedside-clock/internal/bus"
+	"github.com/jasonkradams/bedside-reader/internal/bus"
 )
 
 const ipcSocket = "/tmp/bedside-mpv.sock"
