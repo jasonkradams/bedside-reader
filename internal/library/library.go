@@ -268,3 +268,26 @@ func (m *Manager) GetByFilename(filename string) (*Audiobook, error) {
 	}
 	return found, nil
 }
+
+// SaveProgress saves the playback position for a specific file
+func (m *Manager) SaveProgress(filename string, position float64) error {
+	return m.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketProgress)
+		val := fmt.Sprintf("%f", position)
+		return b.Put([]byte(filename), []byte(val))
+	})
+}
+
+// GetProgress retrieves the playback position for a specific file
+func (m *Manager) GetProgress(filename string) (float64, error) {
+	var position float64
+	err := m.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketProgress)
+		val := b.Get([]byte(filename))
+		if val != nil {
+			fmt.Sscanf(string(val), "%f", &position)
+		}
+		return nil
+	})
+	return position, err
+}

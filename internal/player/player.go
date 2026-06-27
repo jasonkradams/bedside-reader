@@ -26,6 +26,7 @@ type Player struct {
 	reqMutex    sync.Mutex
 	currentPath string
 	pendingSeek float64
+	lastSave    time.Time
 
 	State PlaybackState
 }
@@ -123,6 +124,10 @@ func (p *Player) listen() {
 						if !p.State.Paused {
 							p.State.Position = val
 							p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+							if time.Since(p.lastSave) > 10*time.Second {
+								p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+								p.lastSave = time.Now()
+							}
 						}
 					}
 				case "duration":
@@ -177,6 +182,13 @@ func (p *Player) observeProperty(name string) {
 func (p *Player) LoadFile(path string) error {
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
+	
+	// Load saved progress
+	if pos, err := p.lib.GetProgress(p.State.FilePath); err == nil && pos > 0 {
+		p.State.Position = pos
+		p.pendingSeek = pos
+	}
+	
 	p.State.Paused = false
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 	return p.sendCommand("loadfile", path, "replace")
@@ -196,6 +208,9 @@ func (p *Player) TogglePause() error {
 		// Deep sleep pause (closes ALSA device and kills DAC noise)
 		p.State.Paused = true
 		p.sendCommandNoLock("stop")
+		
+		// Immediately save progress to disk
+		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 	}
 
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
