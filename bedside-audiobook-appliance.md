@@ -233,6 +233,7 @@ Two HATs cohabit cleanly: the Display HAT Mini (SPI + button pins) and the MAX98
 
 | BCM               | Phys | Used by                                     | Notes                                                                    |
 | ----------------- | ---- | ------------------------------------------- | ------------------------------------------------------------------------ |
+| GPIO4             | 7    | **Rotary encoder A**                        | Free GPIO; edge-triggered.                                               |
 | GPIO5             | 29   | **Display HAT Mini: Button A**              | Map to Play/Pause.                                                       |
 | GPIO6             | 31   | **Display HAT Mini: Button B**              | Map to Back.                                                             |
 | GPIO8 (CE0)       | 24   | **Display HAT Mini: SPI CE0**               | ST7789 chip-select.                                                      |
@@ -241,11 +242,12 @@ Two HATs cohabit cleanly: the Display HAT Mini (SPI + button pins) and the MAX98
 | GPIO11 (SCLK)     | 23   | **Display HAT Mini: SPI clock**             |                                                                          |
 | GPIO13            | 33   | **Display HAT Mini: backlight PWM**         | Hardware PWM channel.                                                    |
 | GPIO16            | 36   | **Display HAT Mini: Button X**              | Map to Skip-30.                                                          |
-| GPIO17            | 11   | **Rotary encoder A**                        | Free GPIO; edge-triggered.                                               |
+| GPIO17            | 11   | **Display HAT Mini: RGB LED**               | Multi-channel LED via PWM on shared pins.                                |
 | GPIO18 (PCM_CLK)  | 12   | **MAX98357A: BCLK**                         | I2S bit clock.                                                           |
 | GPIO19 (PCM_FS)   | 35   | **MAX98357A: LRC**                          | I2S word select.                                                         |
+| GPIO20            | 38   | **Rotary encoder B**                        | Free GPIO.                                                               |
 | GPIO21 (PCM_DOUT) | 40   | **MAX98357A: DIN**                          | I2S data.                                                                |
-| GPIO22            | 15   | **Rotary encoder B**                        | Free GPIO.                                                               |
+| GPIO22            | 15   | **Display HAT Mini: RGB LED**               | Multi-channel LED via PWM on shared pins.                                |
 | GPIO23            | 16   | **Rotary encoder push**                     | Free GPIO.                                                               |
 | GPIO24            | 18   | **Display HAT Mini: Button Y**              | Map to Skip+30.                                                          |
 | GPIO25            | 22   | **Display HAT Mini: Reset**                 | ST7789 reset line.                                                       |
@@ -267,11 +269,11 @@ Here is the exact mapping of the 40-pin header to the external components:
                 +3.3V  [ 1]  [ 2]  5V ----------> MAX98357A (Vin)
          SDA (GPIO 2)  [ 3]  [ 4]  5V 
          SCL (GPIO 3)  [ 5]  [ 6]  GND ---------> MAX98357A (GND)
-             (GPIO 4)  [ 7]  [ 8]  TXD
-                  GND  [ 9]  [10]  RXD
-Encoder A   (GPIO 17)  [11]  [12]  (GPIO 18) ---> MAX98357A (BCLK)
-       [HAT LED]       [13]  [14]  GND ---------> Encoder (GND / Common)
-Encoder B   (GPIO 22)  [15]  [16]  (GPIO 23) ---> Encoder (SW+ / Push)
+Encoder A     (GPIO 4)  [ 7]  [ 8]  TXD
+                   GND  [ 9]  [10]  RXD
+[HAT LED]    (GPIO 17)  [11]  [12]  (GPIO 18) ---> MAX98357A (BCLK)
+               (GPIO 27)[13]  [14]  GND ---------> Encoder (GND / Common)
+[HAT LED]    (GPIO 22)  [15]  [16]  (GPIO 23) ---> Encoder (SW+ / Push)
                  3.3V  [17]  [18]  (GPIO 24) [HAT Button Y]
        [HAT SPI MOSI]  [19]  [20]  GND ---------> Encoder (SW- / Push GND)
        [HAT SPI DC]    [21]  [22]  (GPIO 25) [HAT TE]
@@ -282,7 +284,7 @@ Encoder B   (GPIO 22)  [15]  [16]  (GPIO 23) ---> Encoder (SW+ / Push)
 [HAT Button B]         [31]  [32]  (GPIO 12)
 [HAT Backlight]        [33]  [34]  GND
 MAX98357A (LRC) <---   [35]  [36]  (GPIO 16) [HAT Button X]
-    MAX98357A (SD) <-- [37]  [38]  (GPIO 20)
+    MAX98357A (SD) <-- [37]  [38]  (GPIO 20) ---> Encoder B
                   GND  [39]  [40]  (GPIO 21) ---> MAX98357A (DIN)
 
                            [micro-SD side]
@@ -299,8 +301,8 @@ MAX98357A breakout wiring:
   + / -  --> CE32A-4 speaker terminals
 
 Rotary encoder (generic EC11):
-  A      --> GPIO17 (BCM, phys 11)
-  B      --> GPIO22 (BCM, phys 15)
+  A      --> GPIO4 (BCM, phys 7)
+  B      --> GPIO20 (BCM, phys 38)
   COMMON --> GND
   SW+    --> GPIO23 (BCM, phys 16)
   SW-    --> GND

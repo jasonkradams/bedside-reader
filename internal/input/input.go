@@ -49,9 +49,9 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 		go m.watchButton(pin, b.Event)
 	}
 
-	// Start Rotary Encoder (GPIO 17, 22, 23)
-	pinA := gpioreg.ByName("GPIO17")
-	pinB := gpioreg.ByName("GPIO22")
+	// Start Rotary Encoder (GPIO 4, 20, 23)
+	pinA := gpioreg.ByName("GPIO4")
+	pinB := gpioreg.ByName("GPIO20")
 	pinBtn := gpioreg.ByName("GPIO23")
 
 	if pinA != nil && pinB != nil && pinBtn != nil {
