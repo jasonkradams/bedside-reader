@@ -18,7 +18,17 @@ const (
 	// Library Events
 	EventLibraryScanStarted  EventType = "library.scan.started"
 	EventLibraryScanComplete EventType = "library.scan.complete"
+
+	// UI Events
+	EventMenuUpdate EventType = "ui.menu.update"
 )
+
+// MenuState holds the current state of the book selection menu
+type MenuState struct {
+	Active bool
+	Books  any // Will hold []library.Audiobook
+	Index  int
+}
 
 // Event is the generic wrapper for all messages on the bus
 type Event struct {

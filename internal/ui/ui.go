@@ -26,6 +26,7 @@ type Renderer struct {
 
 	// Local state
 	playState player.PlaybackState
+	menuState bus.MenuState
 }
 
 func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
@@ -87,6 +88,11 @@ func (r *Renderer) listen() {
 				r.playState = state
 				needsRender = true
 			}
+		case bus.EventMenuUpdate:
+			if state, ok := ev.Payload.(bus.MenuState); ok {
+				r.menuState = state
+				needsRender = true
+			}
 		}
 
 		if needsRender {
@@ -99,6 +105,55 @@ func (r *Renderer) render() {
 	// 1. Clear background (dark blue)
 	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{color.RGBA{0, 0, 50, 255}}, image.Point{}, draw.Src)
 
+	if r.menuState.Active {
+		r.renderMenu()
+	} else {
+		r.renderPlayer()
+	}
+
+	// Copy to hardware
+	copyToRGB565(r.mmap, r.canvas)
+}
+
+func (r *Renderer) renderMenu() {
+	addLabel(r.canvas, 10, 30, "Select Audiobook:", color.RGBA{255, 255, 255, 255})
+	
+	books, ok := r.menuState.Books.([]library.Audiobook)
+	if !ok || len(books) == 0 {
+		addLabel(r.canvas, 10, 70, "(No audiobooks found)", color.RGBA{150, 150, 150, 255})
+		return
+	}
+	
+	startY := 70
+	for i, book := range books {
+		// Only draw a window of 5 books around the selection
+		if i < r.menuState.Index-2 || i > r.menuState.Index+2 {
+			continue
+		}
+		
+		y := startY + ((i - r.menuState.Index + 2) * 30)
+		
+		title := book.Title
+		if title == "" {
+			title = book.FilePath
+		}
+		if len(title) > 30 {
+			title = title[:27] + "..."
+		}
+		
+		col := color.RGBA{150, 150, 150, 255} // Unselected
+		if i == r.menuState.Index {
+			col = color.RGBA{100, 255, 100, 255} // Highlighted
+			title = "> " + title
+		} else {
+			title = "  " + title
+		}
+		
+		addLabel(r.canvas, 10, y, title, col)
+	}
+}
+
+func (r *Renderer) renderPlayer() {
 	// 2. Query Library for metadata
 	var book *library.Audiobook
 	var chapterTitle string
@@ -196,9 +251,6 @@ func (r *Renderer) render() {
 		)
 		addLabel(r.canvas, 10, 200, totalTimeStr, color.RGBA{150, 150, 150, 255})
 	}
-
-	// Copy to hardware
-	copyToRGB565(r.mmap, r.canvas)
 }
 
 func addLabel(img *image.RGBA, x, y int, label string, col color.RGBA) {

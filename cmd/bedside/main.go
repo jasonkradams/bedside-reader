@@ -51,19 +51,61 @@ func main() {
 	// 6. Connect Input to Player logic
 	ch := eventBus.Subscribe()
 	go func() {
+		inMenu := false
+		menuIndex := 0
+		var menuBooks []library.Audiobook
+
+		publishMenu := func() {
+			eventBus.Publish(bus.EventMenuUpdate, bus.MenuState{
+				Active: inMenu,
+				Books:  menuBooks,
+				Index:  menuIndex,
+			})
+		}
+
 		for ev := range ch {
 			switch ev.Type {
 			case bus.EventButtonPlayPause:
 				log.Println("Received EventButtonPlayPause")
-				mpv.TogglePause()
+				if inMenu {
+					if len(menuBooks) > 0 && menuIndex < len(menuBooks) {
+						mpv.LoadFile(menuBooks[menuIndex].FilePath)
+					}
+					inMenu = false
+					publishMenu()
+				} else {
+					mpv.TogglePause()
+				}
 			case bus.EventButtonSkipFwd:
 				log.Println("Received EventButtonSkipFwd")
-				mpv.SkipChapter(1)
+				if inMenu {
+					if menuIndex < len(menuBooks)-1 {
+						menuIndex++
+						publishMenu()
+					}
+				} else {
+					mpv.SkipChapter(1)
+				}
 			case bus.EventButtonSkipBack:
 				log.Println("Received EventButtonSkipBack")
-				mpv.SkipChapter(-1)
+				if inMenu {
+					if menuIndex > 0 {
+						menuIndex--
+						publishMenu()
+					}
+				} else {
+					mpv.SkipChapter(-1)
+				}
 			case bus.EventButtonMenu:
-				log.Println("Received EventButtonMenu (Not Implemented)")
+				log.Println("Received EventButtonMenu")
+				inMenu = !inMenu
+				if inMenu {
+					menuBooks, _ = lib.GetAll()
+					if menuIndex >= len(menuBooks) {
+						menuIndex = 0
+					}
+				}
+				publishMenu()
 			case bus.EventLibraryScanComplete:
 				log.Println("Received EventLibraryScanComplete")
 				books, _ := lib.GetAll()
