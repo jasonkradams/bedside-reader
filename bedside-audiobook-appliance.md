@@ -253,31 +253,38 @@ Two HATs cohabit cleanly: the Display HAT Mini (SPI + button pins) and the MAX98
 
 ### 4.2 Wiring diagram
 
+Because the **Display HAT Mini** plugs directly into the entire 40-pin header, the external components (Audio Amp and Rotary Encoder) must be wired by either soldering to the underside of the Pi's GPIO pins, or by using an extra-tall "stacking header" that lets the pins protrude through the Display HAT.
+
+Here is the exact mapping of the 40-pin header to the external components:
+
+```text
+                     Raspberry Pi 40-Pin Header
+                             (Top View)
+                           [micro-SD side]
+      
+                +3.3V  [ 1]  [ 2]  5V ----------> MAX98357A (Vin)
+         SDA (GPIO 2)  [ 3]  [ 4]  5V 
+         SCL (GPIO 3)  [ 5]  [ 6]  GND ---------> MAX98357A (GND)
+             (GPIO 4)  [ 7]  [ 8]  TXD
+                  GND  [ 9]  [10]  RXD
+Encoder A   (GPIO 17)  [11]  [12]  (GPIO 18) ---> MAX98357A (BCLK)
+       [HAT LED]       [13]  [14]  GND ---------> Encoder (GND / Common)
+Encoder B   (GPIO 22)  [15]  [16]  (GPIO 23) ---> Encoder (SW+ / Push)
+                 3.3V  [17]  [18]  (GPIO 24) [HAT Button Y]
+       [HAT SPI MOSI]  [19]  [20]  GND ---------> Encoder (SW- / Push GND)
+       [HAT SPI DC]    [21]  [22]  (GPIO 25) [HAT Reset]
+       [HAT SPI SCLK]  [23]  [24]  (GPIO 8)  [HAT SPI CE0]
+                  GND  [25]  [26]  (GPIO 7)
+                ID_SD  [27]  [28]  ID_SC
+[HAT Button A]         [29]  [30]  GND
+[HAT Button B]         [31]  [32]  (GPIO 12)
+[HAT Backlight PWM]    [33]  [34]  GND
+MAX98357A (LRC) <---   [35]  [36]  (GPIO 16) [HAT Button X]
+             (GPIO 26) [37]  [38]  (GPIO 20)
+                  GND  [39]  [40]  (GPIO 21) ---> MAX98357A (DIN)
+
+                         [USB / HDMI side]
 ```
-            ┌─────────────────────────────────────┐
-            │  Pi Zero 2 W (top view)                │
-            │                                          │
-            │   [mini-HDMI] [micro-USB power]         │
-            │                                          │
-            │  GPIO header (40 pin) ──────────┐       │
-            │                                  │       │
-            │      ┌───────────────────────────┴──┐   │
-            │      │  Display HAT Mini  (HAT)     │   │
-            │      │  • 2.0" 320×240 IPS          │   │
-            │      │  • Buttons A B X Y           │   │
-            │      │  • RGB LED                   │   │
-            │      └───────────────────────────────┘   │
-            │                                          │
-            │  Free GPIOs (17, 22, 23) -----> encoder │
-            │  I2S pins (18, 19, 21) ──┐              │
-            │                          v              │
-            │                  ┌──────────────┐       │
-            │                  │ MAX98357A    │── + ─┐│
-            │                  │ I2S breakout │-- - --││
-            │                  └──────────────┘     v │
-            │                                   CE32A-4│
-            │                                   1.25" 4Ω
-            └─────────────────────────────────────────┘
 
 MAX98357A breakout wiring:
   Vin    --> Pi 5V  (header pin 2 or 4)
