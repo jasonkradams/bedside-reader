@@ -99,28 +99,103 @@ func (r *Renderer) render() {
 	// 1. Clear background (dark blue)
 	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{color.RGBA{0, 0, 50, 255}}, image.Point{}, draw.Src)
 
-	// 2. Draw Title
+	// 2. Query Library for metadata
+	var book *library.Audiobook
+	var chapterTitle string
+	var chapterStart float64
+	var chapterEnd float64 = r.playState.Duration
+
+	if r.playState.FilePath != "" {
+		b, err := r.lib.GetByFilename(r.playState.FilePath)
+		if err == nil {
+			book = b
+			
+			// Find current chapter
+			for i, chap := range book.Chapters {
+				if r.playState.Position >= chap.StartTime-0.5 {
+					chapterTitle = chap.Title
+					chapterStart = chap.StartTime
+					if i+1 < len(book.Chapters) {
+						chapterEnd = book.Chapters[i+1].StartTime
+					}
+				} else {
+					break
+				}
+			}
+		}
+	}
+
+	// 3. Draw Book Title
 	title := r.playState.FilePath
 	if title == "" {
 		title = "Bedside Audio"
+	} else if book != nil && book.Title != "" {
+		title = book.Title
+	}
+	
+	// Truncate long titles loosely
+	if len(title) > 35 {
+		title = title[:32] + "..."
 	}
 	addLabel(r.canvas, 10, 30, title, color.RGBA{255, 255, 255, 255})
 
-	// 3. Draw State
+	// 4. Draw Chapter Title
+	if chapterTitle != "" {
+		if len(chapterTitle) > 40 {
+			chapterTitle = chapterTitle[:37] + "..."
+		}
+		addLabel(r.canvas, 10, 70, chapterTitle, color.RGBA{200, 200, 255, 255})
+	}
+
+	// 5. Draw State
 	status := "Paused"
 	if title == "Bedside Audio" {
 		status = "Idle"
 	} else if !r.playState.Paused {
 		status = "Playing"
 	}
-	addLabel(r.canvas, 10, 100, status, color.RGBA{150, 255, 150, 255})
+	addLabel(r.canvas, 10, 110, status, color.RGBA{150, 255, 150, 255})
 
-	// 4. Draw Time
-	timeStr := fmt.Sprintf("%02d:%02d / %02d:%02d",
-		int(r.playState.Position)/60, int(r.playState.Position)%60,
-		int(r.playState.Duration)/60, int(r.playState.Duration)%60,
-	)
-	addLabel(r.canvas, 10, 140, timeStr, color.RGBA{200, 200, 200, 255})
+	// 6. Draw Chapter Progress Bar
+	if title != "Bedside Audio" {
+		chapDur := chapterEnd - chapterStart
+		chapPos := r.playState.Position - chapterStart
+		if chapDur > 0 {
+			pct := chapPos / chapDur
+			if pct > 1 {
+				pct = 1
+			} else if pct < 0 {
+				pct = 0
+			}
+			barWidth := 300
+			filled := int(float64(barWidth) * pct)
+			
+			// Bar outline
+			draw.Draw(r.canvas, image.Rect(10, 150, 10+barWidth, 160), &image.Uniform{color.RGBA{100, 100, 100, 255}}, image.Point{}, draw.Src)
+			// Bar fill
+			draw.Draw(r.canvas, image.Rect(10, 150, 10+filled, 160), &image.Uniform{color.RGBA{100, 255, 100, 255}}, image.Point{}, draw.Src)
+		}
+	}
+
+	// 7. Draw Time Strings
+	if title != "Bedside Audio" {
+		// Chapter time
+		chapDur := chapterEnd - chapterStart
+		chapPos := r.playState.Position - chapterStart
+		
+		chapTimeStr := fmt.Sprintf("Chap: %02d:%02d / %02d:%02d",
+			int(chapPos)/60, int(chapPos)%60,
+			int(chapDur)/60, int(chapDur)%60,
+		)
+		addLabel(r.canvas, 10, 180, chapTimeStr, color.RGBA{200, 200, 200, 255})
+
+		// Total time
+		totalTimeStr := fmt.Sprintf("Total: %02dh%02dm / %02dh%02dm",
+			int(r.playState.Position)/3600, (int(r.playState.Position)%3600)/60,
+			int(r.playState.Duration)/3600, (int(r.playState.Duration)%3600)/60,
+		)
+		addLabel(r.canvas, 10, 200, totalTimeStr, color.RGBA{150, 150, 150, 255})
+	}
 
 	// Copy to hardware
 	copyToRGB565(r.mmap, r.canvas)
