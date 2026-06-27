@@ -303,6 +303,12 @@ Rotary encoder (generic EC11):
   SW+    --> GPIO23 (BCM, phys 16)
   SW-    --> GND
 
+> [!TIP]
+> **Prototyping with Jumper Wires**
+> You do not have to plug the Display HAT directly onto the Pi. You can connect *everything* using standard Female-to-Female jumper wires. 
+> - **Zero data pin conflicts:** The Display HAT and the external components use completely different GPIO data pins.
+> - **No power splicing needed:** The Pi has two 5V pins (use one for the HAT, one for the Amp), two 3.3V pins, and eight GND pins (plenty for the HAT, Amp, and Encoder). You can run dedicated jumper wires for power/ground to every component without needing to splice or share wires.
+
 Internal pull-ups via periph.io are sufficient for both encoder and HAT buttons.
 
 Display HAT Mini buttons (built-in, no wiring):
