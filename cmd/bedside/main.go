@@ -29,18 +29,20 @@ func main() {
 		body {
 			margin: 0;
 			padding: 0;
-			background-color: #000;
+			background-color: #0000aa; /* Blue background to confirm rendering */
 			color: #fff;
-			font-family: 'Inter', sans-serif;
+			font-family: sans-serif;
 			display: flex;
 			align-items: center;
 			justify-content: center;
 			height: 100vh;
 			width: 100vw;
+			cursor: none !important; /* Hide the Wayland cursor */
 		}
 		h1 {
-			font-size: 24px;
-			font-weight: 300;
+			font-size: 32px;
+			font-weight: bold;
+			text-align: center;
 		}
 	</style>
 </head>
