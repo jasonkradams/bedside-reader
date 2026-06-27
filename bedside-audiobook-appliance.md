@@ -249,6 +249,7 @@ Two HATs cohabit cleanly: the Display HAT Mini (SPI + button pins) and the MAX98
 | GPIO23            | 16   | **Rotary encoder push**                     | Free GPIO.                                                               |
 | GPIO24            | 18   | **Display HAT Mini: Button Y**              | Map to Skip+30.                                                          |
 | GPIO25            | 22   | **Display HAT Mini: Reset**                 | ST7789 reset line.                                                       |
+| GND               | 25   | **Display HAT Mini: SPI Ground**            | **CRITICAL** for 60MHz SPI return path; must connect.                    |
 | GPIO27            | 13   | **Display HAT Mini: RGB LED (one channel)** | Multi-channel LED via PWM on shared pins; details in Pimoroni schematic. |
 
 ### 4.2 Wiring diagram
@@ -272,13 +273,13 @@ Encoder A   (GPIO 17)  [11]  [12]  (GPIO 18) ---> MAX98357A (BCLK)
 Encoder B   (GPIO 22)  [15]  [16]  (GPIO 23) ---> Encoder (SW+ / Push)
                  3.3V  [17]  [18]  (GPIO 24) [HAT Button Y]
        [HAT SPI MOSI]  [19]  [20]  GND ---------> Encoder (SW- / Push GND)
-       [HAT SPI DC]    [21]  [22]  (GPIO 25)
+       [HAT SPI DC]    [21]  [22]  (GPIO 25) [HAT TE]
        [HAT SPI SCLK]  [23]  [24]  (GPIO 8)  
-                  GND  [25]  [26]  (GPIO 7)  [HAT SPI CE1]
+                  GND  [25]  [26]  (GPIO 7)  [HAT SPI CS / CE1]
                 ID_SD  [27]  [28]  ID_SC
 [HAT Button A]         [29]  [30]  GND
 [HAT Button B]         [31]  [32]  (GPIO 12)
-[HAT Backlight PWM]    [33]  [34]  GND
+[HAT Backlight]        [33]  [34]  GND
 MAX98357A (LRC) <---   [35]  [36]  (GPIO 16) [HAT Button X]
              (GPIO 26) [37]  [38]  (GPIO 20)
                   GND  [39]  [40]  (GPIO 21) ---> MAX98357A (DIN)
