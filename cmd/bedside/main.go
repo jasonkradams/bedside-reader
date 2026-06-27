@@ -79,8 +79,8 @@ func main() {
 			case bus.EventButtonSkipFwd:
 				log.Println("Received EventButtonSkipFwd")
 				if inMenu {
-					if menuIndex < len(menuBooks)-1 {
-						menuIndex++
+					if menuIndex > 0 {
+						menuIndex--
 						publishMenu()
 					}
 				} else {
@@ -89,8 +89,8 @@ func main() {
 			case bus.EventButtonSkipBack:
 				log.Println("Received EventButtonSkipBack")
 				if inMenu {
-					if menuIndex > 0 {
-						menuIndex--
+					if menuIndex < len(menuBooks)-1 {
+						menuIndex++
 						publishMenu()
 					}
 				} else {
@@ -100,6 +100,7 @@ func main() {
 				log.Println("Received EventButtonMenu")
 				inMenu = !inMenu
 				if inMenu {
+					go lib.Scan() // Immediately check for new files
 					menuBooks, _ = lib.GetAll()
 					if menuIndex >= len(menuBooks) {
 						menuIndex = 0

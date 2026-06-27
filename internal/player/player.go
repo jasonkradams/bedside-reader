@@ -180,13 +180,25 @@ func (p *Player) observeProperty(name string) {
 
 // LoadFile tells mpv to load a new file
 func (p *Player) LoadFile(path string) error {
+	// 1. Save progress of CURRENT file before switching
+	if p.State.FilePath != "" && p.State.Position > 0 {
+		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+	}
+
+	// 2. Send stop to kill the ALSA output instantly (prevents buzzing)
+	p.sendCommand("stop")
+
+	// 3. Update state for new file
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
 	
-	// Load saved progress
+	// 4. Load saved progress for the NEW file
 	if pos, err := p.lib.GetProgress(p.State.FilePath); err == nil && pos > 0 {
 		p.State.Position = pos
 		p.pendingSeek = pos
+	} else {
+		p.State.Position = 0
+		p.pendingSeek = 0
 	}
 	
 	p.State.Paused = false
