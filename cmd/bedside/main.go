@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/coreos/go-systemd/v22/daemon"
 	"golang.org/x/image/font"
@@ -55,6 +56,18 @@ func main() {
 		log.Printf("Failed to notify systemd: %v", err)
 	} else if sent {
 		log.Println("Systemd notified of readiness.")
+	}
+
+	// Handle systemd watchdog
+	interval, err := daemon.SdWatchdogEnabled(false)
+	if err == nil && interval > 0 {
+		go func() {
+			ticker := time.NewTicker(interval / 2)
+			defer ticker.Stop()
+			for range ticker.C {
+				daemon.SdNotify(false, daemon.SdNotifyWatchdog)
+			}
+		}()
 	}
 
 	// Wait for termination signal
