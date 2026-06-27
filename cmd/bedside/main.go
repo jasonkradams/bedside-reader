@@ -47,7 +47,17 @@ func main() {
 	</style>
 </head>
 <body>
-	<h1>Bedside Reader Online</h1>
+	<h1 id="title">Loading...</h1>
+	<script>
+		// WPEWebKit under Cage has a known race condition where if the page loads 
+		// instantly (like from localhost), it paints before Wayland sends the 
+		// initial surface configure event, resulting in a blank screen.
+		// We force a repaint after 1 second to ensure it draws at the correct resolution.
+		setTimeout(() => {
+			document.body.style.backgroundColor = '#005500'; // Dark Green
+			document.getElementById('title').innerText = 'Bedside Reader Online';
+		}, 1000);
+	</script>
 </body>
 </html>
 `
