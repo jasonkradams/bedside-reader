@@ -36,6 +36,9 @@ type Player struct {
 	muteTimer *time.Timer
 
 	State PlaybackState
+
+	// Test hook
+	sendCommandMock func(command ...any) error
 }
 
 // triggerMute temporarily pulls the hardware mute pin low to mask I2S clock transients
@@ -112,7 +115,6 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
 	go p.listen()
 
 	// Observe properties so mpv tells us when they change
-	// We no longer observe "pause" because we manage it manually for deep sleep
 	p.observeProperty("time-pos")
 	p.observeProperty("duration")
 	p.observeProperty("volume")
@@ -213,6 +215,10 @@ func (p *Player) sendCommand(command ...any) error {
 }
 
 func (p *Player) sendCommandNoLock(command ...any) error {
+	if p.sendCommandMock != nil {
+		return p.sendCommandMock(command...)
+	}
+
 	p.reqID++
 	req := map[string]any{
 		"command":    command,
@@ -317,16 +323,6 @@ func (p *Player) Seek(deltaSeconds float64) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
 
-	// If paused, we just update the internal state so when we resume it starts at the new position
-	if p.State.Paused {
-		p.State.Position += deltaSeconds
-		if p.State.Position < 0 {
-			p.State.Position = 0
-		}
-		p.bus.Publish(bus.EventPlayerStateChanged, p.State)
-		return nil
-	}
-
 	p.triggerMute()
 	return p.sendCommandNoLock("seek", deltaSeconds, "relative", "exact")
 }
@@ -335,39 +331,6 @@ func (p *Player) Seek(deltaSeconds float64) error {
 func (p *Player) SkipChapter(delta int) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
-
-	if p.State.Paused {
-		// If paused, we manually calculate the target chapter start time from the DB
-		if p.State.FilePath == "" {
-			return nil
-		}
-		book, err := p.lib.GetByFilename(p.State.FilePath)
-		if err != nil || len(book.Chapters) == 0 {
-			return nil
-		}
-
-		// Find current chapter index based on position
-		currentIdx := 0
-		for i, chap := range book.Chapters {
-			// Add a small epsilon (0.5s) to avoid getting stuck on the boundary
-			if p.State.Position >= chap.StartTime-0.5 {
-				currentIdx = i
-			} else {
-				break
-			}
-		}
-
-		targetIdx := currentIdx + delta
-		if targetIdx < 0 {
-			targetIdx = 0
-		} else if targetIdx >= len(book.Chapters) {
-			targetIdx = len(book.Chapters) - 1
-		}
-
-		p.State.Position = book.Chapters[targetIdx].StartTime
-		p.bus.Publish(bus.EventPlayerStateChanged, p.State)
-		return nil
-	}
 
 	p.triggerMute()
 	return p.sendCommandNoLock("add", "chapter", delta)
