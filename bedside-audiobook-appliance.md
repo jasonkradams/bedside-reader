@@ -287,13 +287,13 @@ MAX98357A (LRC) <---   [35]  [36]  (GPIO 16) [HAT Button X]
 ```
 
 MAX98357A breakout wiring:
-  Vin    --> Pi 5V  (header pin 2 or 4)
-  GND    --> Pi GND (header pin 6, 9, 14, ...)
-  DIN    --> GPIO21 (PCM_DOUT, physical pin 40)
-  BCLK   --> GPIO18 (PCM_CLK,  physical pin 12)
   LRC    --> GPIO19 (PCM_FS,   physical pin 35)
-  SD     --> leave floating (always-on; do NOT tie to GND or amp mutes)
+  BCLK   --> GPIO18 (PCM_CLK,  physical pin 12)
+  DIN    --> GPIO21 (PCM_DOUT, physical pin 40)
   GAIN   --> leave floating (default 9dB)
+  SD     --> leave floating (always-on; do NOT tie to GND or amp mutes)
+  GND    --> Pi GND (header pin 6, 9, 14, ...)
+  Vin    --> Pi 5V  (header pin 2 or 4)
   + / -  --> CE32A-4 speaker terminals
 
 Rotary encoder (generic EC11):
