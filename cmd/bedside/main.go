@@ -13,7 +13,6 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
-	"golang.org/x/sys/unix"
 )
 
 func main() {
@@ -28,11 +27,7 @@ func main() {
 
 	// Memory map the framebuffer (320x240, 16-bit color = 153600 bytes)
 	fbSize := 320 * 240 * 2
-	mmap, err := unix.Mmap(int(fbFile.Fd()), 0, fbSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		log.Fatalf("Failed to mmap framebuffer: %v", err)
-	}
-	defer unix.Munmap(mmap)
+	buffer := make([]byte, fbSize)
 
 	// Create an in-memory canvas
 	canvas := image.NewRGBA(image.Rect(0, 0, 320, 240))
@@ -43,8 +38,16 @@ func main() {
 	// Draw text
 	addLabel(canvas, 100, 120, "Bedside Native UI", color.RGBA{255, 255, 255, 255})
 
-	// Copy the canvas to the framebuffer
-	copyToRGB565(mmap, canvas)
+	// Copy the canvas to the RGB565 byte buffer
+	copyToRGB565(buffer, canvas)
+
+	// Write directly to the framebuffer (forces kernel to flush to SPI)
+	if _, err := fbFile.Seek(0, 0); err != nil {
+		log.Printf("Failed to seek fb: %v", err)
+	}
+	if _, err := fbFile.Write(buffer); err != nil {
+		log.Printf("Failed to write to fb: %v", err)
+	}
 
 	// Notify systemd that the service is ready
 	sent, err := daemon.SdNotify(false, daemon.SdNotifyReady)
@@ -77,19 +80,19 @@ func copyToRGB565(fb []byte, img *image.RGBA) {
 	bounds := img.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
-	
+
 	i := 0
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			c := img.RGBAAt(x, y)
-			
+
 			// RGB565 conversion
 			r := uint16(c.R) >> 3
 			g := uint16(c.G) >> 2
 			b := uint16(c.B) >> 3
-			
+
 			rgb565 := (r << 11) | (g << 5) | b
-			
+
 			// Little Endian layout
 			fb[i] = byte(rgb565)
 			fb[i+1] = byte(rgb565 >> 8)
