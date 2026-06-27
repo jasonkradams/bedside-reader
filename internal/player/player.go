@@ -112,8 +112,10 @@ func (p *Player) listen() {
 			switch name {
 			case "time-pos":
 				if val, ok := data.(float64); ok {
-					p.State.Position = val
-					p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+					if !p.State.Paused {
+						p.State.Position = val
+						p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+					}
 				}
 			case "duration":
 				if val, ok := data.(float64); ok {
