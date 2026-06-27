@@ -93,6 +93,7 @@ write_files:
       Environment=WLR_DRM_DEVICES=/dev/dri/card0
       Environment=WLR_DRM_NO_MODIFIERS=1
       Environment=WLR_NO_HARDWARE_CURSORS=1
+      Environment=WLR_LIBINPUT_NO_DEVICES=1
       Environment=XDG_RUNTIME_DIR=/run/user/0
       ExecStartPre=/usr/bin/mkdir -p /run/user/0
       ExecStartPre=/usr/bin/chmod 700 /run/user/0
