@@ -115,7 +115,7 @@ func main() {
 				// Edge case: single click does not wake screen, so it doesn't matter if it's off.
 				// However, you said if screen is off, turning or clicking should just do it without waking.
 				// So we don't return early!
-				if inMenu {
+				if inMenu && !screenOff {
 					// Cycle timeout: 0 (Off) -> 1 -> 5 -> 15 -> 60 -> 0
 					if menuIndex == 0 {
 						switch screenTimeoutMins {
@@ -232,7 +232,7 @@ func main() {
 				resetScreen(false) // Reset timer, don't wake
 				delta, ok := ev.Payload.(int)
 				if ok {
-					if inMenu {
+					if inMenu && !screenOff {
 						// Scroll menu!
 						if delta > 0 && menuIndex < len(menuBooks) {
 							menuIndex++
