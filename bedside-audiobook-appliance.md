@@ -316,7 +316,6 @@ Display HAT Mini buttons (built-in, no wiring):
   Button B (GPIO6)  --> software: Back / Menu
   Button X (GPIO16) --> software: Skip -30s
   Button Y (GPIO24) --> software: Skip +30s
-```
 
 ### 4.3 /boot/firmware/config.txt
 
