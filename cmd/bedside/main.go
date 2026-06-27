@@ -58,10 +58,10 @@ func main() {
 				mpv.TogglePause()
 			case bus.EventButtonSkipFwd:
 				log.Println("Received EventButtonSkipFwd")
-				mpv.Seek(30)
+				mpv.SkipChapter(1)
 			case bus.EventButtonSkipBack:
 				log.Println("Received EventButtonSkipBack")
-				mpv.Seek(-30)
+				mpv.SkipChapter(-1)
 			case bus.EventButtonMenu:
 				log.Println("Received EventButtonMenu (Not Implemented)")
 			case bus.EventLibraryScanComplete:

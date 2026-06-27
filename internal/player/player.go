@@ -206,6 +206,20 @@ func (p *Player) Seek(deltaSeconds float64) error {
 	return p.sendCommandNoLock("seek", deltaSeconds, "relative", "exact")
 }
 
+// SkipChapter skips forward or backward by chapters
+func (p *Player) SkipChapter(delta int) error {
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
+	
+	// If paused, we can't cleanly skip chapters without parsing the DB ourselves.
+	// For now, only allow chapter skips while playing.
+	if p.State.Paused {
+		return nil
+	}
+
+	return p.sendCommandNoLock("add", "chapter", delta)
+}
+
 // SetVolume sets the absolute volume (0-100)
 func (p *Player) SetVolume(volume float64) error {
 	if volume < 0 {
