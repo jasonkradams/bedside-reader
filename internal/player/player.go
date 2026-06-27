@@ -30,6 +30,7 @@ type Player struct {
 	currentPath string
 	pendingSeek float64
 	lastSave    time.Time
+	isIdle      bool
 
 	mutePin   gpio.PinOut
 	muteTimer *time.Timer
@@ -137,6 +138,7 @@ func (p *Player) listen() {
 			switch event {
 			case "file-loaded":
 				p.reqMutex.Lock()
+				p.isIdle = false
 
 				// Unmute the audio now that the file is fully loaded and ready to play
 				p.sendCommandNoLock("set_property", "mute", false)
@@ -151,6 +153,17 @@ func (p *Player) listen() {
 				if p.pendingSeek > 0 {
 					p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
 					p.pendingSeek = 0
+				}
+				p.reqMutex.Unlock()
+			case "end-file":
+				p.reqMutex.Lock()
+				// Only trigger end-file if it actually finished playing naturally
+				if reason, ok := msg["reason"].(string); ok && reason == "eof" {
+					p.isIdle = true
+					p.State.Paused = true
+					p.State.Position = 0
+					p.lib.SaveProgress(p.State.FilePath, 0)
+					p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 				}
 				p.reqMutex.Unlock()
 			case "property-change":
@@ -262,6 +275,13 @@ func (p *Player) LoadFile(path string) error {
 func (p *Player) TogglePause() error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
+
+	if p.isIdle {
+		p.reqMutex.Unlock()
+		err := p.LoadFile(p.currentPath)
+		p.reqMutex.Lock()
+		return err
+	}
 
 	if p.State.Paused {
 		// Resume playing

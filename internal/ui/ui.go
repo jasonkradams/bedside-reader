@@ -107,10 +107,9 @@ func (r *Renderer) render() {
 	// 1. Clear background (dark blue)
 	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{color.RGBA{0, 0, 50, 255}}, image.Point{}, draw.Src)
 
+	r.renderPlayer()
 	if r.menuState.Active {
 		r.renderMenu()
-	} else {
-		r.renderPlayer()
 	}
 
 	// Copy to hardware
