@@ -94,7 +94,6 @@ write_files:
       ExecStartPre=/usr/bin/sh -c 'until curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'
       ExecStart=/usr/bin/cog \
         --platform=drm \
-        --geometry=320x240 \
         --bg-color=000000 \
         http://localhost:8080
 
@@ -134,6 +133,7 @@ runcmd:
   - [ systemctl, daemon-reload ]
   - [ systemctl, enable, bedside.service ]
   - [ systemctl, enable, cog.service ]
+  - [ cp, /boot/firmware/panel.bin, /lib/firmware/panel.bin ]
   - [ mkdir, -p, /var/lib/bedside/audiobooks ]
   - [ chown, -R, "bedside:bedside", /var/lib/bedside ]
   - [ systemctl, restart, smbd ]

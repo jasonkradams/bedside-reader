@@ -42,10 +42,10 @@ dtoverlay=hifiberry-dac
 
 # Display HAT Mini — ST7789V via SPI, driven through the upstream
 # mipi-dbi-spi DRM driver so Cog/KMS can render to it directly.
-dtoverlay=mipi-dbi-spi,speed=60000000
+dtoverlay=mipi-dbi-spi,spi0-1,speed=60000000
 dtparam=compatible=sitronix\,st7789v\0panel-mipi-dbi-spi
 dtparam=width=320,height=240,width-mm=43,height-mm=27
-dtparam=reset-gpio=25,dc-gpio=9,backlight-gpio=13
+dtparam=dc-gpio=9,backlight-gpio=13
 
 # Hardware watchdog (Zero 2 W has BCM2837 watchdog)
 dtparam=watchdog=on
