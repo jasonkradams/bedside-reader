@@ -99,13 +99,20 @@ func (m *InputManager) watchEncoder(pinA, pinB gpio.PinIO) {
 
 func (m *InputManager) watchButton(pin gpio.PinIO, event bus.EventType) {
 	wasPressed := false
+	var lastPress time.Time
+
 	for {
 		isPressed := pin.Read() == gpio.Low
+		now := time.Now()
+
 		if isPressed && !wasPressed {
-			m.bus.Publish(event, nil)
-			time.Sleep(200 * time.Millisecond) // debounce
+			// Debounce: only register if it's been at least 50ms since last press
+			if now.Sub(lastPress) > 50*time.Millisecond {
+				m.bus.Publish(event, nil)
+				lastPress = now
+			}
 		}
 		wasPressed = isPressed
-		time.Sleep(20 * time.Millisecond) // poll every 20ms
+		time.Sleep(5 * time.Millisecond) // poll every 5ms to catch fast double clicks
 	}
 }

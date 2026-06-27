@@ -71,11 +71,12 @@ func main() {
 		var screenTimer *time.Timer
 		screenOff := false
 
-		resetScreen := func() bool {
+		resetScreen := func(wake bool) bool {
 			wasOff := screenOff
-			screenOff = false
-			// Turn on backlight!
-			display.SetBacklight(true)
+			if wake {
+				screenOff = false
+				display.SetBacklight(true)
+			}
 
 			if screenTimer != nil {
 				screenTimer.Stop()
@@ -88,7 +89,7 @@ func main() {
 			return wasOff
 		}
 
-		resetScreen() // Start the timer
+		resetScreen(true) // Start the timer and wake screen
 
 		inMenu := false
 		menuIndex := 0
@@ -106,14 +107,14 @@ func main() {
 			switch ev.Type {
 			case bus.EventButtonPlayPause:
 				log.Println("Received EventButtonPlayPause")
-				if resetScreen() {
+				if resetScreen(true) {
 					continue
 				}
 				mpv.TogglePause()
 			case "encoder-single-click":
-				if screenOff {
-					continue // Edge case
-				}
+				// Edge case: single click does not wake screen, so it doesn't matter if it's off.
+				// However, you said if screen is off, turning or clicking should just do it without waking.
+				// So we don't return early!
 				if inMenu {
 					// Cycle timeout: 0 (Off) -> 1 -> 5 -> 15 -> 60 -> 0
 					if menuIndex == 0 {
@@ -135,7 +136,7 @@ func main() {
 						// Save it immediately
 						lib.SaveSystemState(mpv.State.FilePath, !mpv.State.Paused, screenTimeoutMins)
 
-						resetScreen()
+						resetScreen(true)
 						publishMenu() // Refresh menu
 					} else if len(menuBooks) > 0 {
 						// Play book! (menuIndex-1 because index 0 is settings)
@@ -155,7 +156,7 @@ func main() {
 				display.SetBacklight(false)
 			case bus.EventButtonSkipFwd:
 				log.Println("Received EventButtonSkipFwd")
-				if resetScreen() {
+				if resetScreen(true) {
 					continue
 				}
 				if inMenu {
@@ -168,7 +169,7 @@ func main() {
 				}
 			case bus.EventButtonSkipBack:
 				log.Println("Received EventButtonSkipBack")
-				if resetScreen() {
+				if resetScreen(true) {
 					continue
 				}
 				if inMenu {
@@ -181,7 +182,7 @@ func main() {
 				}
 			case bus.EventButtonMenu:
 				log.Println("Received EventButtonMenu")
-				if resetScreen() {
+				if resetScreen(true) {
 					continue
 				}
 				inMenu = !inMenu
@@ -200,33 +201,35 @@ func main() {
 				}
 				publishMenu()
 			case bus.EventEncoderBtn:
-				if resetScreen() {
-					continue
-				}
-
 				now := time.Now()
 				if now.Sub(lastEncoderBtnTime) < 400*time.Millisecond {
 					// Double click!
 					if singleClickTimer != nil {
 						singleClickTimer.Stop()
 					}
-					screenOff = true
-					display.SetBacklight(false)
-					if screenTimer != nil {
-						screenTimer.Stop()
+
+					if screenOff {
+						// Already off, double-click turns it ON!
+						resetScreen(true)
+					} else {
+						// It's on, double-click turns it OFF!
+						screenOff = true
+						display.SetBacklight(false)
+						if screenTimer != nil {
+							screenTimer.Stop()
+						}
 					}
 					lastEncoderBtnTime = time.Time{} // reset
 				} else {
 					// Schedule single click
+					resetScreen(false) // Reset timer, don't wake
 					singleClickTimer = time.AfterFunc(400*time.Millisecond, func() {
 						eventBus.Publish("encoder-single-click", nil)
 					})
 					lastEncoderBtnTime = now
 				}
 			case bus.EventEncoderTurn:
-				if resetScreen() {
-					continue
-				}
+				resetScreen(false) // Reset timer, don't wake
 				delta, ok := ev.Payload.(int)
 				if ok {
 					if inMenu {
