@@ -185,9 +185,6 @@ func (p *Player) LoadFile(path string) error {
 		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 	}
 
-	// 2. Send stop to kill the ALSA output instantly (prevents buzzing)
-	p.sendCommand("stop")
-
 	// 3. Update state for new file
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)

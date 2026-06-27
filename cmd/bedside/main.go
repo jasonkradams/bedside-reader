@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -100,27 +101,33 @@ func main() {
 				log.Println("Received EventButtonMenu")
 				inMenu = !inMenu
 				if inMenu {
-					go lib.Scan() // Immediately check for new files
 					menuBooks, _ = lib.GetAll()
-					if menuIndex >= len(menuBooks) {
-						menuIndex = 0
+					
+					// Find the currently playing book to set the cursor
+					currentPath := mpv.State.FilePath
+					menuIndex = 0
+					for i, b := range menuBooks {
+						if filepath.Base(b.FilePath) == currentPath {
+							menuIndex = i
+							break
+						}
 					}
 				}
 				publishMenu()
 			case bus.EventLibraryScanComplete:
 				log.Println("Received EventLibraryScanComplete")
-				books, _ := lib.GetAll()
-				if len(books) > 0 {
-					mpv.LoadFile(books[0].FilePath)
-					// Automatically pause it initially so it doesn't start blasting
-					mpv.TogglePause()
-				}
+				// We no longer auto-play the first book on scan complete!
 			}
 		}
 	}()
 
-	// Trigger a background scan of audiobooks
-	go lib.Scan()
+	// Trigger a periodic background scan of audiobooks
+	go func() {
+		for {
+			lib.Scan()
+			time.Sleep(5 * time.Minute)
+		}
+	}()
 
 	// Notify systemd that the service is ready
 	sent, err := daemon.SdNotify(false, daemon.SdNotifyReady)
