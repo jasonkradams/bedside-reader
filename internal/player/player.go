@@ -179,8 +179,8 @@ func (p *Player) TogglePause() error {
 	if p.State.Paused {
 		// Resume playing
 		p.State.Paused = false
-		options := fmt.Sprintf("start=%.3f", p.State.Position)
-		p.sendCommandNoLock("loadfile", p.currentPath, "replace", options)
+		p.sendCommandNoLock("set_property", "start", p.State.Position)
+		p.sendCommandNoLock("loadfile", p.currentPath, "replace")
 	} else {
 		// Deep sleep pause (closes ALSA device and kills DAC noise)
 		p.State.Paused = true

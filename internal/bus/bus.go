@@ -11,9 +11,9 @@ const (
 	EventButtonSkipBack  EventType = "input.button.skip_back"
 
 	// Player Events
-	EventPlayerStateChanged    EventType = "player.state_changed"
-	EventPlayerProgressTick    EventType = "player.progress_tick"
-	EventPlayerChapterChanged  EventType = "player.chapter_changed"
+	EventPlayerStateChanged   EventType = "player.state_changed"
+	EventPlayerProgressTick   EventType = "player.progress_tick"
+	EventPlayerChapterChanged EventType = "player.chapter_changed"
 
 	// Library Events
 	EventLibraryScanStarted  EventType = "library.scan.started"
@@ -23,7 +23,7 @@ const (
 // Event is the generic wrapper for all messages on the bus
 type Event struct {
 	Type    EventType
-	Payload interface{}
+	Payload any
 }
 
 // Bus is the central nervous system of the appliance
@@ -49,7 +49,7 @@ func (b *Bus) Subscribe() <-chan Event {
 }
 
 // Publish broadcasts an event to all subscribers
-func (b *Bus) Publish(eventType EventType, payload interface{}) {
+func (b *Bus) Publish(eventType EventType, payload any) {
 	b.events <- Event{
 		Type:    eventType,
 		Payload: payload,
