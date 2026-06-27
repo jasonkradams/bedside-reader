@@ -20,8 +20,9 @@ type Player struct {
 	bus      *bus.Bus
 	cmd      *exec.Cmd
 	conn     net.Conn
-	reqID    int
-	reqMutex sync.Mutex
+	reqID       int
+	reqMutex    sync.Mutex
+	currentPath string
 
 	State PlaybackState
 }
@@ -67,7 +68,9 @@ func New(eventBus *bus.Bus) (*Player, error) {
 		}
 	}
 	if err != nil {
-		p.cmd.Process.Kill()
+		if p.cmd.Process != nil {
+			p.cmd.Process.Kill()
+		}
 		return nil, fmt.Errorf("failed to connect to mpv IPC: %w", err)
 	}
 	p.conn = conn
@@ -75,7 +78,7 @@ func New(eventBus *bus.Bus) (*Player, error) {
 	go p.listen()
 
 	// Observe properties so mpv tells us when they change
-	p.observeProperty("pause")
+	// We no longer observe "pause" because we manage it manually for deep sleep
 	p.observeProperty("time-pos")
 	p.observeProperty("duration")
 	p.observeProperty("volume")
@@ -104,11 +107,6 @@ func (p *Player) listen() {
 
 			changed := false
 			switch name {
-			case "pause":
-				if val, ok := data.(bool); ok {
-					p.State.Paused = val
-					changed = true
-				}
 			case "time-pos":
 				if val, ok := data.(float64); ok {
 					p.State.Position = val
@@ -137,7 +135,10 @@ func (p *Player) listen() {
 func (p *Player) sendCommand(command ...any) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
+	return p.sendCommandNoLock(command...)
+}
 
+func (p *Player) sendCommandNoLock(command ...any) error {
 	p.reqID++
 	req := map[string]any{
 		"command":    command,
@@ -160,18 +161,49 @@ func (p *Player) observeProperty(name string) {
 
 // LoadFile tells mpv to load a new file
 func (p *Player) LoadFile(path string) error {
+	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
+	p.State.Paused = false
+	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 	return p.sendCommand("loadfile", path, "replace")
 }
 
-// TogglePause toggles playback state
+// TogglePause toggles playback state using Deep Sleep (stops mpv to close ALSA device)
 func (p *Player) TogglePause() error {
-	return p.sendCommand("cycle", "pause")
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
+
+	if p.State.Paused {
+		// Resume playing
+		p.State.Paused = false
+		p.sendCommandNoLock("set_property", "start", p.State.Position)
+		p.sendCommandNoLock("loadfile", p.currentPath, "replace")
+	} else {
+		// Deep sleep pause (closes ALSA device and kills DAC noise)
+		p.State.Paused = true
+		p.sendCommandNoLock("stop")
+	}
+
+	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+	return nil
 }
 
 // Seek moves the playback position by delta seconds
 func (p *Player) Seek(deltaSeconds float64) error {
-	return p.sendCommand("seek", deltaSeconds, "relative")
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
+	
+	// If paused, we just update the internal state so when we resume it starts at the new position
+	if p.State.Paused {
+		p.State.Position += deltaSeconds
+		if p.State.Position < 0 {
+			p.State.Position = 0
+		}
+		p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+		return nil
+	}
+
+	return p.sendCommandNoLock("seek", deltaSeconds, "relative", "exact")
 }
 
 // SetVolume sets the absolute volume (0-100)
