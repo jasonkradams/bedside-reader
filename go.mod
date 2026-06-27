@@ -8,4 +8,8 @@ require (
 	golang.org/x/sys v0.46.0
 )
 
-require go.etcd.io/bbolt v1.5.0
+require (
+	go.etcd.io/bbolt v1.5.0
+	periph.io/x/conn/v3 v3.7.3
+	periph.io/x/host/v3 v3.8.5
+)
