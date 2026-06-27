@@ -18,13 +18,14 @@ const ipcSocket = "/var/lib/bedside/mpv.sock"
 
 // Player controls the mpv subprocess and exposes playback controls
 type Player struct {
-	bus      *bus.Bus
-	lib      *library.Manager
-	cmd      *exec.Cmd
-	conn     net.Conn
-	reqID    int
-	reqMutex sync.Mutex
+	bus         *bus.Bus
+	lib         *library.Manager
+	cmd         *exec.Cmd
+	conn        net.Conn
+	reqID       int
+	reqMutex    sync.Mutex
 	currentPath string
+	pendingSeek float64
 
 	State PlaybackState
 }
@@ -63,7 +64,7 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
 	// Wait for the socket to be created
 	var conn net.Conn
 	var err error
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		time.Sleep(100 * time.Millisecond)
 		conn, err = net.Dial("unix", ipcSocket)
 		if err == nil {
@@ -103,34 +104,42 @@ func (p *Player) listen() {
 			continue
 		}
 
-		// Handle property changes
-		if event, ok := msg["event"].(string); ok && event == "property-change" {
-			name, _ := msg["name"].(string)
-			data := msg["data"]
+		if event, ok := msg["event"].(string); ok {
+			if event == "file-loaded" {
+				p.reqMutex.Lock()
+				if p.pendingSeek > 0 {
+					p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
+					p.pendingSeek = 0
+				}
+				p.reqMutex.Unlock()
+			} else if event == "property-change" {
+				name, _ := msg["name"].(string)
+				data := msg["data"]
 
-			changed := false
-			switch name {
-			case "time-pos":
-				if val, ok := data.(float64); ok {
-					if !p.State.Paused {
-						p.State.Position = val
-						p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+				changed := false
+				switch name {
+				case "time-pos":
+					if val, ok := data.(float64); ok {
+						if !p.State.Paused {
+							p.State.Position = val
+							p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+						}
+					}
+				case "duration":
+					if val, ok := data.(float64); ok {
+						p.State.Duration = val
+						changed = true
+					}
+				case "volume":
+					if val, ok := data.(float64); ok {
+						p.State.Volume = val
+						changed = true
 					}
 				}
-			case "duration":
-				if val, ok := data.(float64); ok {
-					p.State.Duration = val
-					changed = true
-				}
-			case "volume":
-				if val, ok := data.(float64); ok {
-					p.State.Volume = val
-					changed = true
-				}
-			}
 
-			if changed {
-				p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+				if changed {
+					p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+				}
 			}
 		}
 	}
@@ -181,7 +190,7 @@ func (p *Player) TogglePause() error {
 	if p.State.Paused {
 		// Resume playing
 		p.State.Paused = false
-		p.sendCommandNoLock("set_property", "start", p.State.Position)
+		p.pendingSeek = p.State.Position
 		p.sendCommandNoLock("loadfile", p.currentPath, "replace")
 	} else {
 		// Deep sleep pause (closes ALSA device and kills DAC noise)
@@ -197,7 +206,7 @@ func (p *Player) TogglePause() error {
 func (p *Player) Seek(deltaSeconds float64) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
-	
+
 	// If paused, we just update the internal state so when we resume it starts at the new position
 	if p.State.Paused {
 		p.State.Position += deltaSeconds
@@ -215,7 +224,7 @@ func (p *Player) Seek(deltaSeconds float64) error {
 func (p *Player) SkipChapter(delta int) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
-	
+
 	if p.State.Paused {
 		// If paused, we manually calculate the target chapter start time from the DB
 		if p.State.FilePath == "" {
