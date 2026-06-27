@@ -100,4 +100,6 @@ runcmd:
   - [ cp, /boot/firmware/panel.bin, /lib/firmware/panel.bin ]
   - [ mkdir, -p, /var/lib/bedside/audiobooks ]
   - [ chown, -R, "bedside:bedside", /var/lib/bedside ]
+  - [ chmod, 775, /var/lib/bedside/audiobooks ]
+  - [ usermod, -aG, bedside, pi ]
   - [ systemctl, restart, smbd ]
