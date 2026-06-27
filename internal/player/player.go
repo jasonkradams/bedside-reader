@@ -48,6 +48,7 @@ func New(eventBus *bus.Bus) (*Player, error) {
 		"--no-video",
 		"--really-quiet",
 		"--no-config",
+		"--ao=alsa",
 		fmt.Sprintf("--input-ipc-server=%s", ipcSocket),
 	)
 
