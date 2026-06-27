@@ -301,11 +301,11 @@ MAX98357A breakout wiring:
   + / -  --> CE32A-4 speaker terminals
 
 Rotary encoder (generic EC11):
-  A      --> GPIO4 (BCM, phys 7)
-  B      --> GPIO20 (BCM, phys 38)
-  COMMON --> GND
-  SW+    --> GPIO23 (BCM, phys 16)
-  SW-    --> GND
+  3-Pin Side: Left (A)    --> GPIO4 (BCM, phys 7)
+  3-Pin Side: Right (B)   --> GPIO20 (BCM, phys 38)
+  3-Pin Side: Middle      --> GND (Any ground pin)
+  2-Pin Side: Pin 1 (SW-) --> GND (Any ground pin)
+  2-Pin Side: Pin 2 (SW+) --> GPIO23 (BCM, phys 16)
 
 > [!TIP]
 > **Prototyping with Jumper Wires**
