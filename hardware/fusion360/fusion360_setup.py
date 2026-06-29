@@ -199,12 +199,8 @@ class EnclosureBuilder:
         for bx, by in button_coords:
             circles.addByCenterRadius(adsk.core.Point3D.create(sx+bx, sy+by, 0), 0.25)
 
-        # Rotary
-        rx_center, ry_center = 10.0, 1.1
-        circles.addByCenterRadius(adsk.core.Point3D.create(rx_center, ry_center, 0), 0.35)
-
         # Grille
-        gx_center, gy_center = 10.0, 3.8
+        gx_center, gy_center = 10.5, 3.5
         for i in [-1.2, -0.6, 0, 0.6, 1.2]:
             for j in [-1.2, -0.6, 0, 0.6, 1.2]:
                 if i**2 + j**2 <= 1.5:
@@ -317,8 +313,21 @@ class EnclosureBuilder:
         tapInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(5.5))
         self.extrudes.add(tapInput)
 
+        # Top Panel Rotary Hole
+        top_input = self.planes.createInput()
+        top_input.setByOffset(self.root.xZConstructionPlane, adsk.core.ValueInput.createByReal(self.H))
+        top_plane = self.planes.add(top_input)
+        sk_top = self.root.sketches.add(top_plane)
+        sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(10.5, 3.0, 0), 0.35)
+        topCol = adsk.core.ObjectCollection.create()
+        for p in sk_top.profiles:
+            topCol.add(p)
+        topCut = self.extrudes.createInput(topCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        topCut.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.5))
+        self.extrudes.add(topCut)
+
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
-        gx_center, gy_center = 10.0, 3.8
+        gx_center, gy_center = 10.5, 3.5
         sk_speaker = self.root.sketches.add(screen_plane)
         sk_speaker.sketchCurves.sketchLines.addCenterPointRectangle(
             adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.6, gy_center + 1.6, 0)
