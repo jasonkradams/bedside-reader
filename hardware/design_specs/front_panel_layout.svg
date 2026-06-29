@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 350" width="100%" height="100%">
+  <defs>
+    <style>
+      .bg { fill: #f0f2f5; stroke: #ced4da; stroke-width: 4; }
+      .screen { fill: #111; stroke: #000; stroke-width: 3; }
+      .screen-text { fill: #fff; font-family: monospace; font-size: 16px; text-anchor: middle; }
+      .button { fill: #e9ecef; stroke: #adb5bd; stroke-width: 2; }
+      .btn-label { fill: #495057; font-family: sans-serif; font-size: 14px; font-weight: bold; text-anchor: middle; }
+      .knob-base { fill: #e9ecef; stroke: #adb5bd; stroke-width: 3; }
+      .knob-top { fill: #dee2e6; stroke: #ced4da; stroke-width: 2; }
+      .grille { fill: #495057; }
+      .dimension-line { stroke: #adb5bd; stroke-width: 2; stroke-dasharray: 6,6; }
+      .dimension-text { fill: #868e96; font-family: monospace; font-size: 14px; }
+    </style>
+  </defs>
+
+  <!-- Scale: 1mm = 5 units -->
+  <!-- Dimensions: 140mm wide x 70mm high -->
+  <rect class="bg" x="0" y="0" width="700" height="350" rx="30" />
+
+  <!-- Display Area (41mm x 31mm -> 205x155 units) -->
+  <rect class="screen" x="100" y="97.5" width="205" height="155" rx="5" />
+  <text class="screen-text" x="202.5" y="170">AUDIOBOOK UI</text>
+  <text class="screen-text" x="202.5" y="195">(41mm x 31mm)</text>
+
+  <!-- Corner Buttons (Plungers, 6mm diameter -> r=15 units) -->
+  
+  <!-- NW (FF) -->
+  <circle class="button" cx="75" cy="72.5" r="15" />
+  <text class="btn-label" x="75" y="45">FF</text>
+
+  <!-- SW (RW) -->
+  <circle class="button" cx="75" cy="277.5" r="15" />
+  <text class="btn-label" x="75" y="315">RW</text>
+
+  <!-- NE (Menu) -->
+  <circle class="button" cx="330" cy="72.5" r="15" />
+  <text class="btn-label" x="330" y="45">MENU</text>
+
+  <!-- SE (Play/Pause) -->
+  <circle class="button" cx="330" cy="277.5" r="15" />
+  <text class="btn-label" x="330" y="315">PLAY/PAUSE</text>
+
+  <!-- Rotary Encoder (20mm diameter -> r=50 units) -->
+  <circle class="knob-base" cx="525" cy="125" r="50" />
+  <circle class="knob-top" cx="525" cy="125" r="42" />
+  <!-- Knob indicator line -->
+  <line x1="525" y1="125" x2="525" y2="83" stroke="#adb5bd" stroke-width="4" stroke-linecap="round"/>
+  <text class="btn-label" x="525" y="50">VOLUME (Ø 20mm)</text>
+
+  <!-- Speaker Grille (Circular pattern matching the render) -->
+  <g class="grille">
+    <!-- Center -->
+    <circle cx="525" cy="250" r="4"/>
+    
+    <!-- Inner Ring -->
+    <circle cx="525" cy="230" r="4"/> <circle cx="525" cy="270" r="4"/>
+    <circle cx="505" cy="250" r="4"/> <circle cx="545" cy="250" r="4"/>
+    <circle cx="511" cy="236" r="4"/> <circle cx="539" cy="236" r="4"/>
+    <circle cx="511" cy="264" r="4"/> <circle cx="539" cy="264" r="4"/>
+
+    <!-- Middle Ring -->
+    <circle cx="525" cy="210" r="4"/> <circle cx="525" cy="290" r="4"/>
+    <circle cx="485" cy="250" r="4"/> <circle cx="565" cy="250" r="4"/>
+    <circle cx="497" cy="222" r="4"/> <circle cx="553" cy="222" r="4"/>
+    <circle cx="497" cy="278" r="4"/> <circle cx="553" cy="278" r="4"/>
+    <circle cx="485" cy="235" r="4"/> <circle cx="565" cy="235" r="4"/>
+    <circle cx="485" cy="265" r="4"/> <circle cx="565" cy="265" r="4"/>
+    <circle cx="505" cy="215" r="4"/> <circle cx="545" cy="215" r="4"/>
+    <circle cx="505" cy="285" r="4"/> <circle cx="545" cy="285" r="4"/>
+
+    <!-- Outer Ring -->
+    <circle cx="525" cy="190" r="4"/> <circle cx="525" cy="310" r="4"/>
+    <circle cx="465" cy="250" r="4"/> <circle cx="585" cy="250" r="4"/>
+    <circle cx="483" cy="208" r="4"/> <circle cx="567" cy="208" r="4"/>
+    <circle cx="483" cy="292" r="4"/> <circle cx="567" cy="292" r="4"/>
+    <circle cx="468" cy="232" r="4"/> <circle cx="582" cy="232" r="4"/>
+    <circle cx="468" cy="268" r="4"/> <circle cx="582" cy="268" r="4"/>
+    <circle cx="500" cy="195" r="4"/> <circle cx="550" cy="195" r="4"/>
+    <circle cx="500" cy="305" r="4"/> <circle cx="550" cy="305" r="4"/>
+  </g>
+
+  <!-- Centerlines & Dimensions for CAD Reference -->
+  
+  <!-- Left/Right Centerlines -->
+  <line class="dimension-line" x1="525" y1="0" x2="525" y2="350" />
+  
+  <!-- Horizontal Centerlines -->
+  <!-- Knob Center -->
+  <line class="dimension-line" x1="0" y1="125" x2="700" y2="125" />
+  <!-- Screen Center -->
+  <line class="dimension-line" x1="0" y1="175" x2="400" y2="175" />
+  <!-- Speaker Center -->
+  <line class="dimension-line" x1="450" y1="250" x2="700" y2="250" />
+  
+  <!-- Dimension Callouts -->
+  <text class="dimension-text" x="600" y="120">Y = 25mm</text>
+  <text class="dimension-text" x="15" y="170">Y = 35mm</text>
+  <text class="dimension-text" x="600" y="245">Y = 50mm</text>
+  
+  <text class="dimension-text" x="535" y="335">X = 105mm</text>
+  <text class="dimension-text" x="210" y="335">X = 40.5mm</text>
+
+</svg>

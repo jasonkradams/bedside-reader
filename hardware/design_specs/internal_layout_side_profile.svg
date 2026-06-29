@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 400" width="100%" height="100%">
+  <defs>
+    <style>
+      .wall { fill: none; stroke: #868e96; stroke-width: 10; stroke-linejoin: round; }
+      .component-pi-bg { fill: #d3f9d8; stroke: #2b8a3e; stroke-width: 2; opacity: 0.4; }
+      .component-speaker { fill: #fff3bf; stroke: #f5a623; stroke-width: 3; }
+      .component-encoder { fill: #e3fafc; stroke: #0c8599; stroke-width: 3; }
+      .component-amp { fill: #ffe3e3; stroke: #c92a2a; stroke-width: 3; }
+      .label { fill: #212529; font-family: sans-serif; font-size: 14px; font-weight: bold; text-anchor: middle; }
+      .sub-label { fill: #495057; font-family: monospace; font-size: 12px; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <!-- Enclosure Outline (Side Profile, looking from right side) -->
+  <!-- Front panel is on the left, rear is on the right -->
+  <!-- Dimensions: Depth 60mm (300 units), Height 70mm (350 units) -->
+  <rect class="wall" x="75" y="25" width="300" height="350" rx="20" />
+  <text class="sub-label" x="75" y="15">FRONT PANEL</text>
+  <text class="sub-label" x="375" y="15">REAR PANEL</text>
+
+  <!-- Display HAT Mini (Front panel mounted) -->
+  <!-- Depth ~7mm (35 units). Height 35mm (175 units). -->
+  <rect class="component-pi-bg" x="75" y="112.5" width="35" height="175" rx="2" />
+  <text class="sub-label" x="92.5" y="200" style="opacity: 0.6;">Screen</text>
+
+  <!-- Raspberry Pi Zero 2 W (Floor mounted, Background) -->
+  <rect class="component-pi-bg" x="180" y="320" width="150" height="30" rx="2" />
+  <text class="sub-label" x="255" y="340" style="opacity: 0.6;">Pi (Floor)</text>
+
+  <!-- Soldered wires -->
+  <path class="wall" d="M 110 200 Q 200 200 200 320" style="stroke-dasharray: 6,6; stroke-width: 4;" />
+
+  <!-- Rotary Encoder (Upper Front) -->
+  <!-- Center Y = 25mm down (125 units -> Y=150). Body 12x12mm (60x60). Shaft goes through front. -->
+  <rect class="component-encoder" x="75" y="120" width="60" height="60" rx="2" />
+  <rect class="component-encoder" x="45" y="140" width="30" height="20" />
+  <!-- Knob -->
+  <rect class="component-screen" x="25" y="125" width="20" height="50" rx="2" fill="#adb5bd" stroke="#495057" stroke-width="2" />
+  <text class="label" x="105" y="110">Encoder</text>
+
+  <!-- Speaker (Lower Front) -->
+  <!-- Center Y = 50mm down (250 units -> Y=275). Height 32mm (160 units). Depth 15.5mm (77.5 units). -->
+  <rect class="component-speaker" x="75" y="195" width="77.5" height="160" rx="4" />
+  <text class="label" x="113.75" y="280">Speaker</text>
+
+  <!-- Audio Amp MAX98357A (Mounted on back wall) -->
+  <!-- Height 17.8mm (89 units), Depth 3mm (15 units) -->
+  <rect class="component-amp" x="360" y="220" width="15" height="89" rx="2" />
+  <text class="label" x="320" y="265">Audio</text>
+  <text class="label" x="320" y="280">Amp</text>
+  
+  <!-- USB Power Cutout (Rear, Background, Panel-Mount) -->
+  <!-- Flange mounted against inside of back wall -->
+  <rect class="component-pi-bg" x="340" y="180" width="25" height="55" rx="2" />
+  <!-- USB port extending out the back -->
+  <rect class="component-pi-bg" x="365" y="195" width="30" height="25" />
+  <text class="sub-label" x="315" y="190" style="opacity: 0.6;">USB</text>
+
+</svg>
