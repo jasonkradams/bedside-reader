@@ -66,3 +66,15 @@ Three orders cover the whole build:
 | **Total delivered (estimated)** | **~$135** |
 
 Unique-to-this-build parts (if you already own PSU, SD, jumpers, case): **~$77**
+
+## Enclosure Hardware
+
+| Item | Fastener / Hardware | Quantity | Notes |
+|---|---|:---:|---|
+| Main Enclosure (Corners) | M3 x 50mm Screw | 4 | Secures the front and rear halves together. (Socket head or pan head). |
+| Display HAT Mount | M2.5 x 6mm Screw | 4 | Mounts the HAT to the front faceplate standoffs. |
+| Audio Amp Mount | M2.5 x 6mm Screw | 2 | Mounts the amp to the floor standoffs in the rear bucket. |
+| Speaker Mount | M2.5 x 6mm Screw | 4 | Mounts the CE32A-4 driver to the internal acoustic chamber. |
+| Pi Zero Support (Optional) | M2.5 Brass Standoffs | 4 | Optional spacer between Pi and HAT for extreme rigidity. |
+| Rotary Encoder | Hex Nut & Washer | 1 | Included with the encoder; secures it to the top panel hole. |
+| Speaker Lid | Superglue / VHB Tape | 1 | Secures the acoustic chamber lid once the speaker is wired. |

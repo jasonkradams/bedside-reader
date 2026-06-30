@@ -400,7 +400,6 @@ def run(context):
 
         main_body = builder.build_outer_shell()
         split_plane = builder.split_enclosure(main_body)
-        builder.build_lap_joint(split_plane)
         screen_plane = builder.cut_front_faceplate()
         builder.cut_rear_bucket()
         builder.build_internal_acoustics(screen_plane)
