@@ -360,6 +360,7 @@ class EnclosureBuilder:
         notchExt.participantBodies = [self.front_body]
         self.extrudes.add(notchExt)
 
+        # 1. The Lid Base (Outer Flange)
         lid_input = self.planes.createInput()
         lid_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-1.7))
         lid_plane = self.planes.add(lid_input)
@@ -374,6 +375,60 @@ class EnclosureBuilder:
         lid_feature = self.extrudes.add(lidExt)
         lid_body = lid_feature.bodies.item(0)
         lid_body.name = "Speaker_Acoustic_Lid"
+
+        # 2. The Flexible Lip (Thin Wall)
+        sk_lip = self.root.sketches.add(lid_plane)
+        sk_lip.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.58, gy_center + 1.58, 0)
+        )
+        sk_lip.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.4, gy_center + 1.4, 0)
+        )
+        lipCol = adsk.core.ObjectCollection.create()
+        for p in sk_lip.profiles:
+            if p.profileLoops.count > 1:
+                lipCol.add(p)
+        lipExt = self.extrudes.createInput(lipCol, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        lipExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5)) # 5mm deep into box
+        lipExt.participantBodies = [lid_body]
+        self.extrudes.add(lipExt)
+
+        # 3. The Snap Bump (on the lip)
+        bump_input = self.planes.createInput()
+        bump_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-1.3))
+        bump_plane = self.planes.add(bump_input)
+        sk_bump = self.root.sketches.add(bump_plane)
+        sk_bump.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.63, gy_center + 1.63, 0)
+        )
+        sk_bump.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.58, gy_center + 1.58, 0)
+        )
+        bumpCol = adsk.core.ObjectCollection.create()
+        for p in sk_bump.profiles:
+            if p.profileLoops.count > 1:
+                bumpCol.add(p)
+        bumpExt = self.extrudes.createInput(bumpCol, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        bumpExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.1)) # 1mm wide bump
+        bumpExt.participantBodies = [lid_body]
+        self.extrudes.add(bumpExt)
+
+        # 4. The Snap Groove (cut into the speaker box)
+        sk_groove = self.root.sketches.add(bump_plane)
+        sk_groove.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.65, gy_center + 1.65, 0)
+        )
+        sk_groove.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.60, gy_center + 1.60, 0)
+        )
+        grooveCol = adsk.core.ObjectCollection.create()
+        for p in sk_groove.profiles:
+            if p.profileLoops.count > 1:
+                grooveCol.add(p)
+        grooveExt = self.extrudes.createInput(grooveCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        grooveExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.12)) # 1.2mm wide groove
+        grooveExt.participantBodies = [self.front_body]
+        self.extrudes.add(grooveExt)
 
     def build_floor_mounts(self) -> None:
         floor_input = self.planes.createInput()
