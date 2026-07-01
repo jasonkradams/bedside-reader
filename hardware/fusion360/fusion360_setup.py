@@ -347,7 +347,7 @@ class EnclosureBuilder:
         self._create_standoffs(self.rear_body, rear_plane, 11.2, 2.0, 1.25, 0.0, 0.5)
 
         # Pi Zero Standoffs
-        self._create_standoffs(self.rear_body, rear_plane, 3.55, 3.5, 5.8, 2.3, 0.5)
+        self._create_standoffs(self.rear_body, rear_plane, 4.75, 1.8, 5.8, 2.3, 0.5)
 
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
         gx_center, gy_center = 10.5, 3.5
@@ -367,21 +367,6 @@ class EnclosureBuilder:
         self._safe_join(self.front_body, spkExt)
 
         self._create_standoffs(self.front_body, screen_plane, gx_center, gy_center, 2.45, 2.45, -0.2)
-
-        notch_input = self.planes.createInput()
-        notch_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-2.05))
-        notch_plane = self.planes.add(notch_input)
-        sk_notch = self.root.sketches.add(notch_plane)
-        sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(gx_center - 1.675, gy_center, 0),
-            adsk.core.Point3D.create(gx_center - 1.675 + 0.1, gy_center + 0.15, 0)
-        )
-        notchCol = adsk.core.ObjectCollection.create()
-        notchCol.add(sk_notch.profiles.item(0))
-        notchExt = self.extrudes.createInput(notchCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.2))
-        notchExt.participantBodies = [self.front_body]
-        self.extrudes.add(notchExt)
 
         # 1. The Lid Base (Outer Flange)
         lid_input = self.planes.createInput()
@@ -452,6 +437,22 @@ class EnclosureBuilder:
         grooveExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.12)) # 1.2mm wide groove
         grooveExt.participantBodies = [self.front_body]
         self.extrudes.add(grooveExt)
+
+        # 5. The Speaker Wire Notch
+        notch_input = self.planes.createInput()
+        notch_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-2.05))
+        notch_plane = self.planes.add(notch_input)
+        sk_notch = self.root.sketches.add(notch_plane)
+        sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx_center - 1.675, gy_center, 0),
+            adsk.core.Point3D.create(gx_center - 1.675 + 0.1, gy_center + 0.15, 0)
+        )
+        notchCol = adsk.core.ObjectCollection.create()
+        notchCol.add(sk_notch.profiles.item(0))
+        notchExt = self.extrudes.createInput(notchCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5))
+        notchExt.participantBodies = [self.front_body, lid_body]
+        self.extrudes.add(notchExt)
 
     def build_floor_mounts(self) -> None:
         pass
