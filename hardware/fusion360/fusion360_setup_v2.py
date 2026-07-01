@@ -316,7 +316,7 @@ class EnclosureBuilder:
         for p in sk_clear.profiles:
             clCol.add(p)
         clInput = self.extrudes.createInput(clCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        clInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(4.8))
+        clInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(self.D - 1.2))
         self.extrudes.add(clInput)
 
         sk_tap = self.root.sketches.add(rear_plane)
@@ -327,7 +327,7 @@ class EnclosureBuilder:
         for p in sk_tap.profiles:
             tapCol.add(p)
         tapInput = self.extrudes.createInput(tapCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        tapInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(5.5))
+        tapInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(self.D - 0.5))
         self.extrudes.add(tapInput)
 
         # Top Panel Rotary Hole
