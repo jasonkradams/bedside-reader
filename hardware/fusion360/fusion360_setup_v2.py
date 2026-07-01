@@ -124,8 +124,8 @@ class EnclosureBuilder:
         boss_plane = self.planes.add(boss_input)
         sk_boss = self.root.sketches.add(boss_plane)
 
-        for cx in [1.0, self.W - 1.0]:
-            for cy in [1.0, self.H - 1.0]:
+        for cx in [0.75, self.W - 0.75]:
+            for cy in [0.75, self.H - 0.75]:
                 sk_boss.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), 0.4)
 
         bCol = adsk.core.ObjectCollection.create()
@@ -298,8 +298,8 @@ class EnclosureBuilder:
         self.extrudes.add(cutRearInput)
 
         sk_cb = self.root.sketches.add(rear_plane)
-        for cx in [1.0, self.W - 1.0]:
-            for cy in [1.0, self.H - 1.0]:
+        for cx in [0.75, self.W - 0.75]:
+            for cy in [0.75, self.H - 0.75]:
                 sk_cb.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), 0.3)
         cbCol = adsk.core.ObjectCollection.create()
         for p in sk_cb.profiles:
@@ -309,8 +309,8 @@ class EnclosureBuilder:
         self.extrudes.add(cbInput)
 
         sk_clear = self.root.sketches.add(rear_plane)
-        for cx in [1.0, self.W - 1.0]:
-            for cy in [1.0, self.H - 1.0]:
+        for cx in [0.75, self.W - 0.75]:
+            for cy in [0.75, self.H - 0.75]:
                 sk_clear.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), 0.16)
         clCol = adsk.core.ObjectCollection.create()
         for p in sk_clear.profiles:
@@ -320,8 +320,8 @@ class EnclosureBuilder:
         self.extrudes.add(clInput)
 
         sk_tap = self.root.sketches.add(rear_plane)
-        for cx in [1.0, self.W - 1.0]:
-            for cy in [1.0, self.H - 1.0]:
+        for cx in [0.75, self.W - 0.75]:
+            for cy in [0.75, self.H - 0.75]:
                 sk_tap.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), 0.14)
         tapCol = adsk.core.ObjectCollection.create()
         for p in sk_tap.profiles:
