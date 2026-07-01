@@ -1,2 +1,40 @@
-./bedside
+# Binaries
+bedside
 build/
+
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Nix
+result
+result-*
+.direnv/
+
+# Fusion 360 / CAD
+*.f3d
+*.3mf
+*.stl
+*.step
+
+# OS Files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
