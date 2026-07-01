@@ -323,7 +323,7 @@ Display HAT Mini buttons (built-in, no wiring):
 
 ### 4.3 /boot/firmware/config.txt
 
-The complete and optimized configuration is stored in the repository at [boot/config.txt](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/boot/config.txt).
+The complete and optimized configuration is stored in the repository at [boot/config.txt](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/boot/config.txt).
 
 
 ### 4.4 Backlight control from Go
@@ -365,7 +365,7 @@ func (b *Backlight) Set(duty float64) error {
 }
 ```
 
-Grant the bedside user write access without root via udev. The configuration file is stored in the repository at [udev/90-backlight.rules](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/udev/90-backlight.rules).
+Grant the bedside user write access without root via udev. The configuration file is stored in the repository at [udev/90-backlight.rules](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/udev/90-backlight.rules).
 
 
 ### 4.5 HAT buttons + encoder in Go
@@ -416,9 +416,9 @@ func Open() (*Pins, error) {
 - Pi OS Lite (Bookworm, 64-bit). No desktop, no Xorg, no Wayland compositor.
 - First boot: SSH enabled via `userconf.txt`, hostname `bedside`, fixed wifi creds via NetworkManager.
 - **Read-only root + tmpfs overlay** for `/var/log` and Cog's WebKit cache. Use `overlayroot` (Debian) or hand-roll with `overlayfs` in initramfs. Position DB on a separate writable partition mounted noatime.
-- **Optimized Kernel Command Line**: The optimized `/boot/firmware/cmdline.txt` configuration is stored in the repository at [boot/cmdline.txt](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/boot/cmdline.txt). It contains parameters (`quiet splash loglevel=3 logo.nologo`) to suppress system diagnostics and logos for a silent, appliance-like boot.
+- **Optimized Kernel Command Line**: The optimized `/boot/firmware/cmdline.txt` configuration is stored in the repository at [boot/cmdline.txt](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/boot/cmdline.txt). It contains parameters (`quiet splash loglevel=3 logo.nologo`) to suppress system diagnostics and logos for a silent, appliance-like boot.
 - **Boot Partition Cleanup**: To optimize disk space and remove clutter on a Pi Zero 2 W, delete redundant boot firmware and device trees for other architectures (e.g., `kernel_2712.img`, `initramfs_2712`, `start4*.elf`, `fixup4*.dat`, and unused `.dtb` files).
-- **Automated Provisioning (cloud-init)**: The customized `/boot/firmware/user-data` configuration is stored in the repository at [boot/user-data](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/boot/user-data). It automates the installation of required packages, creates the `bedside` system user and groups, writes udev rules and systemd service files, and automatically starts services on first boot.
+- **Automated Provisioning (cloud-init)**: The customized `/boot/firmware/user-data` configuration is stored in the repository at [boot/user-data](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/boot/user-data). It automates the installation of required packages, creates the `bedside` system user and groups, writes udev rules and systemd service files, and automatically starts services on first boot.
 
 
 ### 5.2 Partition layout
@@ -468,11 +468,11 @@ cog.service            (Cog --platform=drm @ http://localhost:8080)
 
 #### /etc/systemd/system/bedside.service
 
-This service runs the Go server. The configuration file is stored in the repository at [systemd/bedside.service](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/systemd/bedside.service).
+This service runs the Go server. The configuration file is stored in the repository at [systemd/bedside.service](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/systemd/bedside.service).
 
 #### /etc/systemd/system/cog.service
 
-This service runs the Cog kiosk on KMS/DRM. The configuration file is stored in the repository at [systemd/cog.service](file:///Users/jasonadams/code/github/jasonkradams/bedside-clock/systemd/cog.service).
+This service runs the Cog kiosk on KMS/DRM. The configuration file is stored in the repository at [systemd/cog.service](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/systemd/cog.service).
 
 
 **Why this is shorter than the Chromium version**: no Xorg, no Openbox, no unclutter, no PAM session, no display number, no user-data-dir tax. Cog opens `/dev/dri/card0` directly, KMS gives it the framebuffer, WebKitGTK draws into it. The user just needs `video` + `render` groups.
