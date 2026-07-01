@@ -209,7 +209,7 @@ class EnclosureBuilder:
             circles.addByCenterRadius(adsk.core.Point3D.create(sx+bx, sy+by, 0), 0.25)
 
         # Grille
-        gx_center, gy_center = 8.45, 2.9
+        gx_center, gy_center = 9.65, 2.9
         for i in [-1.2, -0.6, 0, 0.6, 1.2]:
             for j in [-1.2, -0.6, 0, 0.6, 1.2]:
                 if i**2 + j**2 <= 1.5:
@@ -335,7 +335,7 @@ class EnclosureBuilder:
         top_input.setByOffset(self.root.xZConstructionPlane, adsk.core.ValueInput.createByReal(self.H))
         top_plane = self.planes.add(top_input)
         sk_top = self.root.sketches.add(top_plane)
-        sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(8.45, 2.0, 0), 0.35)
+        sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(9.65, 2.0, 0), 0.35)
         topCol = adsk.core.ObjectCollection.create()
         for p in sk_top.profiles:
             topCol.add(p)
@@ -350,7 +350,7 @@ class EnclosureBuilder:
         self._create_standoffs(self.rear_body, rear_plane, 4.65, 1.7, 5.8, 2.3, 0.5)
 
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
-        gx_center, gy_center = 8.45, 2.9
+        gx_center, gy_center = 9.65, 2.9
         sk_speaker = self.root.sketches.add(screen_plane)
         sk_speaker.sketchCurves.sketchLines.addCenterPointRectangle(
             adsk.core.Point3D.create(gx_center, gy_center, 0), adsk.core.Point3D.create(gx_center + 1.6, gy_center + 1.6, 0)
