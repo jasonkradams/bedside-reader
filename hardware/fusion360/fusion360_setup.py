@@ -90,12 +90,21 @@ class EnclosureBuilder:
         main_body.name = "Enclosure_Solid"
 
         # Ergonomic Fillet
-        edgeCol = adsk.core.ObjectCollection.create()
+        vertCol = adsk.core.ObjectCollection.create()
+        horizCol = adsk.core.ObjectCollection.create()
         for edge in main_body.edges:
-            edgeCol.add(edge)
+            p1 = edge.startVertex.geometry
+            p2 = edge.endVertex.geometry
+            if abs(p1.x - p2.x) < 1e-5 and abs(p1.y - p2.y) < 1e-5:
+                vertCol.add(edge)
+            else:
+                horizCol.add(edge)
 
         filletInput = self.fillets.createInput()
-        filletInput.addConstantRadiusEdgeSet(edgeCol, adsk.core.ValueInput.createByReal(1.0), True)
+        if vertCol.count > 0:
+            filletInput.addConstantRadiusEdgeSet(vertCol, adsk.core.ValueInput.createByReal(1.0), True)
+        if horizCol.count > 0:
+            filletInput.addConstantRadiusEdgeSet(horizCol, adsk.core.ValueInput.createByReal(0.2), True)
         filletInput.isG2 = False
         try:
             self.fillets.add(filletInput)
@@ -150,8 +159,8 @@ class EnclosureBuilder:
 
     def build_lap_joint(self, splitPlane: adsk.fusion.ConstructionPlane) -> None:
         sk_lip = self.root.sketches.add(splitPlane)
-        self._draw_rounded_rect(sk_lip, self.W/2, self.H/2, self.W - 2*self.wall, self.H - 2*self.wall, 1.0 - self.wall)
-        self._draw_rounded_rect(sk_lip, self.W/2, self.H/2, self.W - 2*self.wall - 0.2, self.H - 2*self.wall - 0.2, 1.0 - self.wall - 0.1)
+        self._draw_rounded_rect(sk_lip, self.W/2, self.H/2, self.W - 0.2, self.H - 0.2, 0.9)
+        self._draw_rounded_rect(sk_lip, self.W/2, self.H/2, self.W - 0.4, self.H - 0.4, 0.8)
 
         lipCol = adsk.core.ObjectCollection.create()
         for p in sk_lip.profiles:
@@ -191,10 +200,10 @@ class EnclosureBuilder:
 
         # Buttons
         button_coords = [
-            (-2.5, 0.95),
-            (-2.5, -0.95),
-            (2.5, 0.95),
-            (2.5, -0.95)
+            (-2.5, 0.6),
+            (-2.5, -0.6),
+            (2.5, 0.6),
+            (2.5, -0.6)
         ]
         for bx, by in button_coords:
             circles.addByCenterRadius(adsk.core.Point3D.create(sx+bx, sy+by, 0), 0.25)
@@ -213,14 +222,10 @@ class EnclosureBuilder:
         cutFrontInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.5))
         self.extrudes.add(cutFrontInput)
 
-        # Button Bridges
+        # Button Bridges (Flexure arms)
         sk_bridge = self.root.sketches.add(self.root.xYConstructionPlane)
         for bx, by in button_coords:
             cx, cy = sx+bx, sy+by
-
-            # Draw the 3mm plunger
-            sk_bridge.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), 0.15)
-
             bridge_width = 0.1
             dx = -0.25 if bx < 0 else 0.25
             sk_bridge.sketchCurves.sketchLines.addTwoPointRectangle(
@@ -231,8 +236,20 @@ class EnclosureBuilder:
         for p in sk_bridge.profiles:
             brCol.add(p)
         brExt = self.extrudes.createInput(brCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-        brExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.15))
+        brExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.06)) # 0.6mm thin flexure
         self._safe_join(self.front_body, brExt)
+
+        # Button Plungers
+        sk_plunger = self.root.sketches.add(self.root.xYConstructionPlane)
+        for bx, by in button_coords:
+            cx, cy = sx+bx, sy+by
+            sk_plunger.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(cx, cy, 0), 0.15)
+        plCol = adsk.core.ObjectCollection.create()
+        for p in sk_plunger.profiles:
+            plCol.add(p)
+        plExt = self.extrudes.createInput(plCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        plExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.20)) # 2.0mm thick plunger
+        self._safe_join(self.front_body, plExt)
 
         sp_input = self.planes.createInput()
         sp_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-self.wall))
@@ -255,7 +272,7 @@ class EnclosureBuilder:
         self._safe_join(self.front_body, crExt)
 
         # Screen Standoffs (Pi mounting holes)
-        self._create_standoffs(self.front_body, screen_plane, sx, sy, 5.8, 2.3, -0.4)
+        self._create_standoffs(self.front_body, screen_plane, sx, sy, 5.8, 2.3, -0.2)
 
         return screen_plane
 
@@ -265,7 +282,7 @@ class EnclosureBuilder:
         rear_plane = self.planes.add(rp_input)
         sk_rear = self.root.sketches.add(rear_plane)
 
-        ux, uy = 11.2, 1.0
+        ux, uy = 11.2, 1.1
         sk_rear.sketchCurves.sketchLines.addCenterPointRectangle(
             adsk.core.Point3D.create(ux, uy, 0),
             adsk.core.Point3D.create(ux + 0.5, uy + 0.25, 0)
@@ -326,6 +343,12 @@ class EnclosureBuilder:
         topCut.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.5))
         self.extrudes.add(topCut)
 
+        # Audio Amp Standoffs
+        self._create_standoffs(self.rear_body, rear_plane, 11.2, 2.0, 1.25, 0.0, 0.5)
+
+        # Pi Zero Standoffs
+        self._create_standoffs(self.rear_body, rear_plane, 3.55, 3.5, 5.8, 2.3, 0.5)
+
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
         gx_center, gy_center = 10.5, 3.5
         sk_speaker = self.root.sketches.add(screen_plane)
@@ -340,13 +363,13 @@ class EnclosureBuilder:
             if p.profileLoops.count > 1:
                 spkCol.add(p)
         spkExt = self.extrudes.createInput(spkCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-        spkExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-1.5))
+        spkExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-1.85))
         self._safe_join(self.front_body, spkExt)
 
-        self._create_standoffs(self.front_body, screen_plane, gx_center, gy_center, 2.6, 2.6, -0.2)
+        self._create_standoffs(self.front_body, screen_plane, gx_center, gy_center, 2.45, 2.45, -0.2)
 
         notch_input = self.planes.createInput()
-        notch_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-1.7))
+        notch_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-2.05))
         notch_plane = self.planes.add(notch_input)
         sk_notch = self.root.sketches.add(notch_plane)
         sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
@@ -362,7 +385,7 @@ class EnclosureBuilder:
 
         # 1. The Lid Base (Outer Flange)
         lid_input = self.planes.createInput()
-        lid_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-1.7))
+        lid_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-2.05))
         lid_plane = self.planes.add(lid_input)
         sk_lid = self.root.sketches.add(lid_plane)
         sk_lid.sketchCurves.sketchLines.addCenterPointRectangle(
@@ -395,7 +418,7 @@ class EnclosureBuilder:
 
         # 3. The Snap Bump (on the lip)
         bump_input = self.planes.createInput()
-        bump_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-1.3))
+        bump_input.setByOffset(self.root.xYConstructionPlane, adsk.core.ValueInput.createByReal(-1.65))
         bump_plane = self.planes.add(bump_input)
         sk_bump = self.root.sketches.add(bump_plane)
         sk_bump.sketchCurves.sketchLines.addCenterPointRectangle(
@@ -431,12 +454,7 @@ class EnclosureBuilder:
         self.extrudes.add(grooveExt)
 
     def build_floor_mounts(self) -> None:
-        floor_input = self.planes.createInput()
-        floor_input.setByOffset(self.root.xZConstructionPlane, adsk.core.ValueInput.createByReal(self.wall))
-        floor_plane = self.planes.add(floor_input)
-
-        # Audio Amp Standoffs
-        self._create_standoffs(self.rear_body, floor_plane, 10.0, 3.0, 1.4, 0.0, 0.5)
+        pass
 
 
 def run(context):
@@ -455,10 +473,10 @@ def run(context):
 
         main_body = builder.build_outer_shell()
         split_plane = builder.split_enclosure(main_body)
+        builder.build_lap_joint(split_plane)
         screen_plane = builder.cut_front_faceplate()
         builder.cut_rear_bucket()
         builder.build_internal_acoustics(screen_plane)
-        builder.build_floor_mounts()
 
         app.activeViewport.fit()
         ui.messageBox('Automated Enclosure Generation Complete!\nCheck the Timeline for the step-by-step features.')
