@@ -209,7 +209,7 @@ class EnclosureBuilder:
             circles.addByCenterRadius(adsk.core.Point3D.create(sx+bx, sy+by, 0), 0.25)
 
         # Grille
-        gx_center, gy_center = 10.5, 3.5
+        gx_center, gy_center = 8.45, 2.9
         for i in [-1.2, -0.6, 0, 0.6, 1.2]:
             for j in [-1.2, -0.6, 0, 0.6, 1.2]:
                 if i**2 + j**2 <= 1.5:
@@ -282,13 +282,13 @@ class EnclosureBuilder:
         rear_plane = self.planes.add(rp_input)
         sk_rear = self.root.sketches.add(rear_plane)
 
-        ux, uy = 10.5, 2.0
+        ux, uy = 10.7, 2.85
         sk_rear.sketchCurves.sketchLines.addCenterPointRectangle(
             adsk.core.Point3D.create(ux, uy, 0),
-            adsk.core.Point3D.create(ux + 0.5, uy + 0.25, 0)
+            adsk.core.Point3D.create(ux + 0.25, uy + 0.5, 0)
         )
-        sk_rear.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(ux - 0.9, uy, 0), 0.15)
-        sk_rear.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(ux + 0.9, uy, 0), 0.15)
+        sk_rear.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(ux, uy - 0.9, 0), 0.15)
+        sk_rear.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(ux, uy + 0.9, 0), 0.15)
 
         rpCol = adsk.core.ObjectCollection.create()
         for p in sk_rear.profiles:
