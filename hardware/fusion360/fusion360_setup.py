@@ -444,8 +444,8 @@ class EnclosureBuilder:
         notch_plane = self.planes.add(notch_input)
         sk_notch = self.root.sketches.add(notch_plane)
         sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(gx_center - 1.675, gy_center, 0),
-            adsk.core.Point3D.create(gx_center - 1.675 + 0.1, gy_center + 0.15, 0)
+            adsk.core.Point3D.create(gx_center - 1.575, gy_center, 0),
+            adsk.core.Point3D.create(gx_center - 1.575 + 0.25, gy_center + 0.15, 0)
         )
         notchCol = adsk.core.ObjectCollection.create()
         notchCol.add(sk_notch.profiles.item(0))
