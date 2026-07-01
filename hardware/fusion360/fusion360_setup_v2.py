@@ -191,7 +191,7 @@ class EnclosureBuilder:
         lines = sk_front.sketchCurves.sketchLines
 
         # Screen Window
-        sx, sy = 4.45, 2.9
+        sx, sy = 4.60, 2.9
         sw, sh = 4.1, 3.1
         lines.addCenterPointRectangle(
             adsk.core.Point3D.create(sx, sy, 0),
@@ -347,7 +347,7 @@ class EnclosureBuilder:
         self._create_standoffs(self.rear_body, rear_plane, 9.0, 2.85, 1.25, 0.0, 0.5)
 
         # Pi Zero Standoffs
-        self._create_standoffs(self.rear_body, rear_plane, 4.45, 1.7, 5.8, 2.3, 0.5)
+        self._create_standoffs(self.rear_body, rear_plane, 4.60, 1.7, 5.8, 2.3, 0.5)
 
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
         gx_center, gy_center = 9.70, 2.9
