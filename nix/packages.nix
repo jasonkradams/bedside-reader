@@ -141,9 +141,9 @@ let
     name = "start-builder";
     text = ''
       echo "Starting macOS linux-builder VM (requires sudo for the network interface)..."
-      # We explicitly use nixos-24.05 to avoid a known QEMU 11.0 HVF bug on Apple Silicon 
-      # (hvf_arch_init_vcpu: assertion failed) present in nixpkgs-unstable.
-      nix run github:NixOS/nixpkgs/nixos-24.05#darwin.linux-builder
+      # We explicitly use nixos-23.11 to avoid a known QEMU HVF bug on Apple Silicon 
+      # (hvf_arch_init_vcpu: assertion failed) present in newer QEMU versions on M3/M4.
+      nix run github:NixOS/nixpkgs/nixos-23.11#darwin.linux-builder
     '';
   };
 
