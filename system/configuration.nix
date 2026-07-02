@@ -76,11 +76,9 @@
   networking.wireless = {
     enable = true;
     interfaces = [ "wlan0" ];
-    # Define a dummy network so NixOS generates the wpa_supplicant systemd service.
-    # Our preStart script below will inject the real configuration dynamically.
-    networks = {
-      "dummy-force-service-creation" = {};
-    };
+    # By NOT defining `networks`, NixOS automatically enables imperative mode
+    # which provisions `/etc/wpa_supplicant/imperative.conf` and uses it as the
+    # primary config, bypassing any ReadOnlyPaths mount namespace issues.
   };
 
   # Use DHCP on wlan0 once connected
@@ -88,29 +86,13 @@
 
   # We read the user's wireless.env file from the FAT32 boot partition
   # to dynamically configure Wi-Fi without hardcoding credentials in Nix.
-  # This runs as a separate oneshot service before wpa_supplicant so the file
-  # exists when systemd sets up the wpa_supplicant mount namespaces.
-  systemd.services.bedside-wifi-setup = {
-    description = "Generate Wi-Fi config from FAT32 boot partition";
-    before = [ "wpa_supplicant-wlan0.service" ];
-    wantedBy = [ "wpa_supplicant-wlan0.service" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      if [ -f /boot/firmware/wireless.env ]; then
-        # shellcheck source=/dev/null
-        source /boot/firmware/wireless.env
-        printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /run/wireless.conf
-      else
-        touch /run/wireless.conf
-      fi
-    '';
-  };
-
-  # Tell wpa_supplicant to load our dynamically generated config
-  networking.wireless.extraConfigFiles = [ "/run/wireless.conf" ];
+  systemd.services."wpa_supplicant-wlan0".preStart = lib.mkAfter ''
+    if [ -f /boot/firmware/wireless.env ]; then
+      # shellcheck source=/dev/null
+      source /boot/firmware/wireless.env
+      printf "ctrl_interface=/run/wpa_supplicant\nnetwork={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /etc/wpa_supplicant/imperative.conf
+    fi
+  '';
 
   # ---------------------------------------------------------
   # Systemd Services
