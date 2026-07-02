@@ -223,7 +223,7 @@ let
         done
       fi
       
-      IMG=$(ls result-img/nixos-image-*.img.zst 2>/dev/null | head -n 1 || true)
+      IMG=$(find result-img -name "nixos-image-*.img.zst" 2>/dev/null | head -n 1 || true)
       if [ -z "$IMG" ]; then
         echo "Error: No compressed image found in result-img/ directory."
         echo "Did you run 'build-os' first?"
@@ -232,7 +232,7 @@ let
 
       if df | grep -q "$DISK"; then
         echo "Warning: $DISK (or its partitions) is currently mounted."
-        read -p "It must be unmounted to continue. Unmount now? [y/N] " confirm
+        read -r -p "It must be unmounted to continue. Unmount now? [y/N] " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
           echo "Aborted."
           exit 1
