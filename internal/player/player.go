@@ -126,86 +126,113 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
 	return p, nil
 }
 
-// listen reads events and property changes from mpv
+// listen reads newline-delimited JSON events from mpv and dispatches them.
 func (p *Player) listen() {
 	scanner := bufio.NewScanner(p.conn)
 	for scanner.Scan() {
-		line := scanner.Bytes()
-
 		var msg map[string]any
-		if err := json.Unmarshal(line, &msg); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
 			continue
 		}
+		p.handleEvent(msg)
+	}
+}
 
-		if event, ok := msg["event"].(string); ok {
-			switch event {
-			case "file-loaded":
-				p.handleFileLoaded()
-			case "end-file":
-				p.reqMutex.Lock()
-				p.isIdle = true
-				p.State.Paused = true
-				// Only reset progress to 0 if it actually finished playing naturally
-				if reason, ok := msg["reason"].(string); ok && reason == "eof" {
-					p.State.Position = 0
-					p.lib.SaveProgress(p.State.FilePath, 0)
-				}
-				p.bus.Publish(bus.EventPlayerStateChanged, p.State)
-				p.reqMutex.Unlock()
-			case "property-change":
-				name, _ := msg["name"].(string)
-				data := msg["data"]
+func (p *Player) handleEvent(msg map[string]any) {
+	event, ok := msg["event"].(string)
+	if !ok {
+		return
+	}
+	switch event {
+	case "file-loaded":
+		p.handleFileLoaded()
+	case "end-file":
+		p.handleEndFile(msg)
+	case "property-change":
+		p.handlePropertyChange(msg)
+	}
+}
 
-				changed := false
-				switch name {
-				case "time-pos":
-					if val, ok := data.(float64); ok {
-						p.State.Position = val
-						p.bus.Publish(bus.EventPlayerProgressTick, p.State)
-						
-						// Mute the hardware slightly before the file naturally ends to mask the ALSA pop
-						if p.State.Duration > 0 {
-							remaining := p.State.Duration - p.State.Position
-							if remaining > 0 && remaining <= 3.0 && p.eofMuteTimer == nil {
-								delay := remaining - 0.25 // Mute 250ms before EOF
-								if delay < 0 {
-									delay = 0
-								}
-								p.eofMuteTimer = time.AfterFunc(time.Duration(delay*float64(time.Second)), func() {
-									if p.mutePin != nil {
-										_ = p.mutePin.Out(gpio.Low)
-									}
-								})
-							} else if remaining > 3.0 {
-								p.cancelEofMuteTimer()
-							}
-						}
+func (p *Player) handleEndFile(msg map[string]any) {
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
 
-						if time.Since(p.lastSave) > 10*time.Second {
-							p.lib.SaveProgress(p.State.FilePath, p.State.Position)
-							_, _, timeout, _ := p.lib.GetSystemState()
-							p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
-							p.lastSave = time.Now()
-						}
-					}
-				case "duration":
-					if val, ok := data.(float64); ok {
-						p.State.Duration = val
-						changed = true
-					}
-				case "volume":
-					if val, ok := data.(float64); ok {
-						p.State.Volume = val
-						changed = true
-					}
-				}
+	p.isIdle = true
+	p.State.Paused = true
+	// Only reset progress to 0 if the file finished playing naturally.
+	if reason, ok := msg["reason"].(string); ok && reason == "eof" {
+		p.State.Position = 0
+		p.lib.SaveProgress(p.State.FilePath, 0)
+	}
+	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+}
 
-				if changed {
-					p.bus.Publish(bus.EventPlayerStateChanged, p.State)
-				}
-			}
+func (p *Player) handlePropertyChange(msg map[string]any) {
+	name, _ := msg["name"].(string)
+	data := msg["data"]
+
+	switch name {
+	case "time-pos":
+		if val, ok := data.(float64); ok {
+			p.handleTimePos(val)
+		}
+	case "duration":
+		if val, ok := data.(float64); ok {
+			p.State.Duration = val
+			p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+		}
+	case "volume":
+		if val, ok := data.(float64); ok {
+			p.State.Volume = val
+			p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 		}
 	}
+}
+
+// handleTimePos processes a playback position update: it broadcasts progress,
+// arms the pre-EOF hardware mute, and throttles progress persistence.
+func (p *Player) handleTimePos(val float64) {
+	p.State.Position = val
+	p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+	p.muteBeforeEOF()
+	p.persistProgressPeriodically()
+}
+
+// muteBeforeEOF pulls the hardware mute low shortly before the track ends to
+// mask the ALSA pop, and cancels a scheduled mute if playback moves away again.
+func (p *Player) muteBeforeEOF() {
+	if p.State.Duration <= 0 {
+		return
+	}
+	remaining := p.State.Duration - p.State.Position
+	switch {
+	case remaining > 0 && remaining <= 3.0 && p.eofMuteTimer == nil:
+		delay := remaining - 0.25 // Mute 250ms before EOF
+		if delay < 0 {
+			delay = 0
+		}
+		p.eofMuteTimer = time.AfterFunc(time.Duration(delay*float64(time.Second)), func() {
+			if p.mutePin != nil {
+				_ = p.mutePin.Out(gpio.Low)
+			}
+		})
+	case remaining > 3.0:
+		p.cancelEofMuteTimer()
+	}
+}
+
+// persistProgressPeriodically saves playback position and system state to disk
+// at most once every 10 seconds to limit write churn.
+func (p *Player) persistProgressPeriodically() {
+	if time.Since(p.lastSave) <= 10*time.Second {
+		return
+	}
+	p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+	sysState, _ := p.lib.GetSystemState()
+	sysState.ActiveFile = p.currentPath
+	sysState.Playing = !p.State.Paused
+	_ = p.lib.SaveSystemState(sysState)
+	p.lastSave = time.Now()
 }
 
 func (p *Player) handleFileLoaded() {
@@ -281,17 +308,21 @@ func (p *Player) LoadFile(path string) error {
 func (p *Player) saveCurrentState() {
 	if p.State.FilePath != "" && p.State.Position > 0 {
 		_ = p.lib.SaveProgress(p.State.FilePath, p.State.Position)
-		_, _, timeout, _ := p.lib.GetSystemState()
-		_ = p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
+		sysState, _ := p.lib.GetSystemState()
+		sysState.ActiveFile = p.currentPath
+		sysState.Playing = !p.State.Paused
+		_ = p.lib.SaveSystemState(sysState)
 	}
 }
 
 func (p *Player) loadNewState(path string) {
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
-	
-	_, _, timeout, _ := p.lib.GetSystemState()
-	_ = p.lib.SaveSystemState(path, true, timeout)
+
+	sysState, _ := p.lib.GetSystemState()
+	sysState.ActiveFile = path
+	sysState.Playing = true
+	_ = p.lib.SaveSystemState(sysState)
 
 	if pos, err := p.lib.GetProgress(p.State.FilePath); err == nil && pos > 0 {
 		p.State.Position = pos
@@ -336,16 +367,20 @@ func (p *Player) TogglePause() error {
 
 func (p *Player) resume() {
 	p.State.Paused = false
-	_, _, timeout, _ := p.lib.GetSystemState()
-	_ = p.lib.SaveSystemState(p.currentPath, true, timeout)
+	sysState, _ := p.lib.GetSystemState()
+	sysState.ActiveFile = p.currentPath
+	sysState.Playing = true
+	_ = p.lib.SaveSystemState(sysState)
 	_ = p.sendCommandNoLock("set_property", "pause", false)
 	p.triggerMute()
 }
 
 func (p *Player) pause() {
 	p.State.Paused = true
-	_, _, timeout, _ := p.lib.GetSystemState()
-	_ = p.lib.SaveSystemState(p.currentPath, false, timeout)
+	sysState, _ := p.lib.GetSystemState()
+	sysState.ActiveFile = p.currentPath
+	sysState.Playing = false
+	_ = p.lib.SaveSystemState(sysState)
 	_ = p.sendCommandNoLock("set_property", "pause", true)
 
 	if p.mutePin != nil {
@@ -358,7 +393,6 @@ func (p *Player) pause() {
 	// Immediately save progress to disk
 	_ = p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 }
-
 
 // Seek moves the playback position by delta seconds
 func (p *Player) Seek(deltaSeconds float64) error {

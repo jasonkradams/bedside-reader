@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"github.com/jasonkradams/bedside-reader/internal/library"
@@ -18,17 +19,34 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// UI palette. color.RGBA values cannot be constants, so these are package vars.
+var (
+	colorBackground   = color.RGBA{0, 0, 50, 255}      // screen background
+	colorMenuOverlay  = color.RGBA{0, 0, 0, 230}       // dimmed menu backdrop
+	colorText         = color.RGBA{255, 255, 255, 255} // primary text / selected book
+	colorMuted        = color.RGBA{200, 200, 200, 255} // secondary text / menu row
+	colorFaint        = color.RGBA{150, 150, 150, 255} // total-time line
+	colorChapter      = color.RGBA{200, 200, 255, 255} // chapter title
+	colorStatus       = color.RGBA{150, 255, 150, 255} // play/pause status line
+	colorBarTrack     = color.RGBA{100, 100, 100, 255} // progress bar background
+	colorBarFill      = color.RGBA{100, 255, 100, 255} // progress bar fill
+	colorMenuHeader   = color.RGBA{200, 255, 200, 255} // "Library Menu" heading
+	colorMenuSelected = color.RGBA{255, 255, 50, 255}  // highlighted settings row
+	colorNowPlaying   = color.RGBA{150, 200, 255, 255} // book currently loaded
+)
+
 type Renderer struct {
 	bus    *bus.Bus
 	lib    *library.Manager
 	fbFile *os.File
 	mmap   []byte
 	canvas *image.RGBA
+	mu     sync.Mutex
 
 	// Local state
-	playState player.PlaybackState
-	menuState bus.MenuState
-	scrubMode bool
+	playState   player.PlaybackState
+	menuState   bus.MenuState
+	encoderMode string
 }
 
 func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
@@ -104,8 +122,11 @@ func (r *Renderer) listen() {
 }
 
 func (r *Renderer) render() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	// 1. Clear background (dark blue)
-	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{color.RGBA{0, 0, 50, 255}}, image.Point{}, draw.Src)
+	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{colorBackground}, image.Point{}, draw.Src)
 
 	r.renderPlayer()
 	if r.menuState.Active {
@@ -116,185 +137,280 @@ func (r *Renderer) render() {
 	copyToRGB565(r.mmap, r.canvas)
 }
 
+// Menu layout geometry, in pixels.
+const (
+	menuFirstRowY = 70
+	menuRowHeight = 25
+	menuBottomY   = 220
+)
+
 func (r *Renderer) renderMenu() {
-	// Draw opaque background over part of the screen
-	draw.Draw(r.canvas, image.Rect(0, 30, 320, 240), &image.Uniform{color.RGBA{0, 0, 0, 230}}, image.Point{}, draw.Src)
-	addLabel(r.canvas, 10, 50, "Library Menu", color.RGBA{200, 255, 200, 255})
+	r.drawMenuBackground()
 
-	books, ok := r.menuState.Books.([]library.Audiobook)
-	if !ok {
-		books = []library.Audiobook{}
-	}
+	books := r.menuBooks()
+	scrollStart := menuScrollStart(r.menuState.Index)
+	y := menuFirstRowY
 
-	// Figure out scroll offset to keep selected item on screen
-	// Menu Index 0 is Settings. Books are 1..N
-	scrollStart := 0
-	if r.menuState.Index > 5 {
-		scrollStart = r.menuState.Index - 5
-	}
-
-	y := 70
-
-	// Render Settings Item
+	// Menu index 0 is the Settings row; books follow at indices 1..N. The
+	// Settings row is only visible before the list has scrolled.
 	if scrollStart == 0 {
-		c := color.RGBA{200, 200, 200, 255}
-		prefix := "  "
-		if r.menuState.Index == 0 {
-			c = color.RGBA{255, 255, 50, 255}
-			prefix = "> "
-		}
-		_, _, timeout, _ := r.lib.GetSystemState()
-		timeoutStr := "Off"
-		if timeout > 0 {
-			timeoutStr = fmt.Sprintf("%dm", timeout)
-		}
-		addLabel(r.canvas, 10, y, fmt.Sprintf("%sSettings: Screen Timeout [%s]", prefix, timeoutStr), c)
-		y += 25
+		r.drawSettingsRow(y)
+		y += menuRowHeight
 	}
 
-	// Render Books
 	for i := scrollStart; i < len(books); i++ {
-		if y > 220 {
+		if y > menuBottomY {
 			break // off screen
 		}
-		b := books[i]
-		title := b.Title
-		if title == "" {
-			title = filepath.Base(b.FilePath)
-		}
-		if len(title) > 42 {
-			title = title[:39] + "..."
-		}
-
-		c := color.RGBA{200, 200, 200, 255}
-		prefix := "  "
-		if i+1 == r.menuState.Index {
-			c = color.RGBA{255, 255, 255, 255}
-			prefix = "> "
-		} else if filepath.Base(b.FilePath) == filepath.Base(r.playState.FilePath) {
-			c = color.RGBA{150, 200, 255, 255}
-			prefix = "* "
-		}
-		addLabel(r.canvas, 10, y, prefix+title, c)
-		y += 25
+		r.drawBookRow(y, i, books[i])
+		y += menuRowHeight
 	}
 }
 
-func (r *Renderer) renderPlayer() {
-	// 2. Query Library for metadata
-	var book *library.Audiobook
-	var chapterTitle string
-	var chapterStart float64
-	chapterEnd := r.playState.Duration
+func (r *Renderer) drawMenuBackground() {
+	fillRect(r.canvas, 0, 30, 320, 210, colorMenuOverlay)
+	addLabel(r.canvas, 10, 50, "Library Menu", colorMenuHeader)
+}
 
-	if r.playState.FilePath != "" {
-		b, err := r.lib.GetByFilename(r.playState.FilePath)
-		if err == nil {
-			book = b
-			
-			// Default chapterEnd to book duration in case mpv hasn't loaded duration yet
-			chapterEnd = book.Duration
-			if chapterEnd == 0 {
-				chapterEnd = r.playState.Duration // ultimate fallback
-			}
-
-			// Find current chapter
-			for i, chap := range book.Chapters {
-				if r.playState.Position >= chap.StartTime-0.5 {
-					chapterTitle = chap.Title
-					chapterStart = chap.StartTime
-					if i+1 < len(book.Chapters) {
-						chapterEnd = book.Chapters[i+1].StartTime
-					} else {
-						// Last chapter, use book duration
-						if book.Duration > 0 {
-							chapterEnd = book.Duration
-						}
-					}
-				} else {
-					break
-				}
-			}
-		}
+// menuBooks returns the audiobook list carried on the menu state, or nil when
+// the payload is missing or of an unexpected type.
+func (r *Renderer) menuBooks() []library.Audiobook {
+	books, ok := r.menuState.Books.([]library.Audiobook)
+	if !ok {
+		return nil
 	}
+	return books
+}
 
-	// 3. Draw Book Title
-	title := r.playState.FilePath
+// menuScrollStart returns the first list row to draw so the selected item stays
+// on screen once the selection moves past the visible window.
+func menuScrollStart(index int) int {
+	const visibleBeforeSelection = 5
+	if index > visibleBeforeSelection {
+		return index - visibleBeforeSelection
+	}
+	return 0
+}
+
+func (r *Renderer) drawSettingsRow(y int) {
+	c := colorMuted
+	prefix := "  "
+	if r.menuState.Index == 0 {
+		c = colorMenuSelected
+		prefix = "> "
+	}
+	sysState, _ := r.lib.GetSystemState()
+	label := fmt.Sprintf("%sSettings: Screen Timeout [%s]", prefix, timeoutLabel(sysState.Timeout))
+	addLabel(r.canvas, 10, y, label, c)
+}
+
+// timeoutLabel renders the screen-timeout setting; non-positive means off.
+func timeoutLabel(minutes int) string {
+	if minutes <= 0 {
+		return "Off"
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
+func (r *Renderer) drawBookRow(y, i int, b library.Audiobook) {
+	prefix, c := r.bookRowStyle(i, b)
+	addLabel(r.canvas, 10, y, prefix+bookTitle(b), c)
+}
+
+// bookRowStyle returns the marker prefix and color for book row i: the selected
+// row wins, then the currently-playing book, then a plain row.
+func (r *Renderer) bookRowStyle(i int, b library.Audiobook) (string, color.RGBA) {
+	switch {
+	case i+1 == r.menuState.Index:
+		return "> ", colorText
+	case filepath.Base(b.FilePath) == filepath.Base(r.playState.FilePath):
+		return "* ", colorNowPlaying
+	default:
+		return "  ", colorMuted
+	}
+}
+
+// bookTitle returns the display title for a book, falling back to the file's
+// base name, truncated to fit the menu width.
+func bookTitle(b library.Audiobook) string {
+	title := b.Title
 	if title == "" {
-		title = "Bedside Audio"
-	} else if book != nil && book.Title != "" {
-		title = book.Title
+		title = filepath.Base(b.FilePath)
+	}
+	return truncate(title, 42)
+}
+
+// idleTitle is shown on the player screen when no audiobook is loaded.
+const idleTitle = "Bedside Audio"
+
+// chapterInfo describes the currently-playing chapter's title and bounds,
+// resolved from library metadata and the current playback position.
+type chapterInfo struct {
+	title string
+	start float64
+	end   float64
+}
+
+func (r *Renderer) renderPlayer() {
+	book := r.currentBook()
+	chapter := r.resolveChapter(book)
+	title := r.displayTitle(book)
+	idle := title == idleTitle
+
+	r.drawTitle(title)
+	r.drawChapterTitle(chapter.title)
+	r.drawStatus(idle)
+
+	if idle {
+		return
+	}
+	r.drawChapterProgress(chapter)
+	r.drawTimes(chapter)
+}
+
+// currentBook returns the library metadata for the loaded file, or nil when
+// nothing is playing or the file is not in the library.
+func (r *Renderer) currentBook() *library.Audiobook {
+	if r.playState.FilePath == "" {
+		return nil
+	}
+	book, err := r.lib.GetByFilename(r.playState.FilePath)
+	if err != nil {
+		return nil
+	}
+	return book
+}
+
+// resolveChapter finds the chapter containing the current playback position.
+// The end time falls back to the book (or stream) duration when the position
+// precedes the first chapter or when metadata is incomplete.
+func (r *Renderer) resolveChapter(book *library.Audiobook) chapterInfo {
+	info := chapterInfo{end: r.playState.Duration}
+	if book == nil {
+		return info
 	}
 
-	// Truncate long titles loosely
-	if len(title) > 44 {
-		title = title[:41] + "..."
+	// Default end to book duration in case mpv hasn't reported it yet.
+	info.end = book.Duration
+	if info.end == 0 {
+		info.end = r.playState.Duration // ultimate fallback
 	}
-	addLabel(r.canvas, 10, 30, title, color.RGBA{255, 255, 255, 255})
 
-	// 4. Draw Chapter Title
-	if chapterTitle != "" {
-		if len(chapterTitle) > 40 {
-			chapterTitle = chapterTitle[:37] + "..."
+	for i, chap := range book.Chapters {
+		if r.playState.Position < chap.StartTime-0.5 {
+			break
 		}
-		addLabel(r.canvas, 10, 70, chapterTitle, color.RGBA{200, 200, 255, 255})
+		info.title = chap.Title
+		info.start = chap.StartTime
+		if i+1 < len(book.Chapters) {
+			info.end = book.Chapters[i+1].StartTime
+		} else if book.Duration > 0 {
+			info.end = book.Duration
+		}
 	}
+	return info
+}
 
-	// 5. Draw State
+// displayTitle picks the label for the loaded file: the library title when
+// known, otherwise the raw file path, or idleTitle when nothing is playing.
+func (r *Renderer) displayTitle(book *library.Audiobook) string {
+	if r.playState.FilePath == "" {
+		return idleTitle
+	}
+	if book != nil && book.Title != "" {
+		return book.Title
+	}
+	return r.playState.FilePath
+}
+
+func (r *Renderer) drawTitle(title string) {
+	addLabel(r.canvas, 10, 30, truncate(title, 44), colorText)
+}
+
+func (r *Renderer) drawChapterTitle(title string) {
+	if title == "" {
+		return
+	}
+	addLabel(r.canvas, 10, 70, truncate(title, 40), colorChapter)
+}
+
+func (r *Renderer) drawStatus(idle bool) {
 	status := "Paused"
-	if title == "Bedside Audio" {
+	switch {
+	case idle:
 		status = "Idle"
-	} else if !r.playState.Paused {
+	case !r.playState.Paused:
 		status = "Playing"
 	}
 
-	if r.scrubMode {
-		status = fmt.Sprintf("%s  |  Mode: Scrub", status)
+	if r.encoderMode == "scrub" {
+		status += "  |  Mode: Scrub"
 	} else {
-		status = fmt.Sprintf("%s  |  Vol: %d%%", status, int(r.playState.Volume))
+		status += fmt.Sprintf("  |  Vol: %d%%", int(r.playState.Volume))
 	}
-	addLabel(r.canvas, 10, 110, status, color.RGBA{150, 255, 150, 255})
+	addLabel(r.canvas, 10, 110, status, colorStatus)
+}
 
-	// 6. Draw Chapter Progress Bar
-	if title != "Bedside Audio" {
-		chapDur := chapterEnd - chapterStart
-		chapPos := r.playState.Position - chapterStart
-		if chapDur > 0 {
-			pct := chapPos / chapDur
-			if pct > 1 {
-				pct = 1
-			} else if pct < 0 {
-				pct = 0
-			}
-			barWidth := 300
-			filled := int(float64(barWidth) * pct)
-
-			// Bar outline
-			draw.Draw(r.canvas, image.Rect(10, 150, 10+barWidth, 160), &image.Uniform{color.RGBA{100, 100, 100, 255}}, image.Point{}, draw.Src)
-			// Bar fill
-			draw.Draw(r.canvas, image.Rect(10, 150, 10+filled, 160), &image.Uniform{color.RGBA{100, 255, 100, 255}}, image.Point{}, draw.Src)
-		}
+func (r *Renderer) drawChapterProgress(chapter chapterInfo) {
+	dur := chapter.end - chapter.start
+	if dur <= 0 {
+		return
 	}
+	pct := clamp01((r.playState.Position - chapter.start) / dur)
 
-	// 7. Draw Time Strings
-	if title != "Bedside Audio" {
-		// Chapter time
-		chapDur := chapterEnd - chapterStart
-		chapPos := r.playState.Position - chapterStart
+	const barWidth = 300
+	fillRect(r.canvas, 10, 150, barWidth, 10, colorBarTrack)
+	fillRect(r.canvas, 10, 150, int(float64(barWidth)*pct), 10, colorBarFill)
+}
 
-		chapTimeStr := fmt.Sprintf("Chap: %02d:%02d / %02d:%02d",
-			int(chapPos)/60, int(chapPos)%60,
-			int(chapDur)/60, int(chapDur)%60,
-		)
-		addLabel(r.canvas, 10, 180, chapTimeStr, color.RGBA{200, 200, 200, 255})
+func (r *Renderer) drawTimes(chapter chapterInfo) {
+	chapPos := r.playState.Position - chapter.start
+	chapDur := chapter.end - chapter.start
+	addLabel(r.canvas, 10, 180,
+		fmt.Sprintf("Chap: %s / %s", formatMinSec(chapPos), formatMinSec(chapDur)),
+		colorMuted)
 
-		// Total time
-		totalTimeStr := fmt.Sprintf("Total: %02dh%02dm / %02dh%02dm",
-			int(r.playState.Position)/3600, (int(r.playState.Position)%3600)/60,
-			int(r.playState.Duration)/3600, (int(r.playState.Duration)%3600)/60,
-		)
-		addLabel(r.canvas, 10, 200, totalTimeStr, color.RGBA{150, 150, 150, 255})
+	addLabel(r.canvas, 10, 200,
+		fmt.Sprintf("Total: %s / %s", formatHourMin(r.playState.Position), formatHourMin(r.playState.Duration)),
+		colorFaint)
+}
+
+// fillRect paints a solid w×h rectangle with its top-left corner at (x, y).
+func fillRect(img *image.RGBA, x, y, w, h int, c color.RGBA) {
+	draw.Draw(img, image.Rect(x, y, x+w, y+h), &image.Uniform{c}, image.Point{}, draw.Src)
+}
+
+// truncate shortens s to at most max bytes, replacing the tail with "..." when
+// it would otherwise overflow.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
 	}
+	return s[:max-3] + "..."
+}
+
+// clamp01 constrains v to the [0, 1] range.
+func clamp01(v float64) float64 {
+	switch {
+	case v > 1:
+		return 1
+	case v < 0:
+		return 0
+	default:
+		return v
+	}
+}
+
+// formatMinSec renders a duration in seconds as MM:SS.
+func formatMinSec(seconds float64) string {
+	s := int(seconds)
+	return fmt.Sprintf("%02d:%02d", s/60, s%60)
+}
+
+// formatHourMin renders a duration in seconds as HHhMMm.
+func formatHourMin(seconds float64) string {
+	s := int(seconds)
+	return fmt.Sprintf("%02dh%02dm", s/3600, (s%3600)/60)
 }
 
 func addLabel(img *image.RGBA, x, y int, label string, col color.RGBA) {
@@ -335,8 +451,10 @@ func copyToRGB565(dst []byte, src *image.RGBA) {
 	}
 }
 
-// SetScrubMode updates the scrub mode toggle for the UI
-func (r *Renderer) SetScrubMode(scrub bool) {
-	r.scrubMode = scrub
+// SetEncoderMode updates the encoder mode display
+func (r *Renderer) SetEncoderMode(mode string) {
+	r.mu.Lock()
+	r.encoderMode = mode
+	r.mu.Unlock()
 	r.render()
 }

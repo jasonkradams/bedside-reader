@@ -265,6 +265,20 @@ func (m *Manager) GetByFilename(filename string) (*Audiobook, error) {
 	return found, nil
 }
 
+// ChapterIndexAt returns the index of the chapter that contains the given position.
+// It includes a 0.5s tolerance for chapter boundaries.
+func ChapterIndexAt(chapters []Chapter, position float64) int {
+	idx := -1
+	for i, chap := range chapters {
+		if position >= chap.StartTime-0.5 {
+			idx = i
+		} else {
+			break
+		}
+	}
+	return idx
+}
+
 // SaveProgress saves the playback position for a specific file
 func (m *Manager) SaveProgress(filename string, position float64) error {
 	return m.db.Update(func(tx *bbolt.Tx) error {
@@ -288,44 +302,37 @@ func (m *Manager) GetProgress(filename string) (float64, error) {
 	return position, err
 }
 
-// SaveSystemState saves the last active file, whether it was playing, and the screen timeout setting in minutes
-func (m *Manager) SaveSystemState(activeFile string, playing bool, timeout int) error {
+type SystemState struct {
+	ActiveFile  string  `json:"activeFile"`
+	Playing     bool    `json:"playing"`
+	Timeout     int     `json:"timeout"`
+	Volume      float64 `json:"volume"`
+	EncoderMode string  `json:"encoderMode"`
+}
+
+// SaveSystemState saves the full system state
+func (m *Manager) SaveSystemState(state SystemState) error {
 	return m.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketSystem)
-		state := map[string]any{
-			"activeFile": activeFile,
-			"playing":    playing,
-			"timeout":    timeout,
-		}
 		data, _ := json.Marshal(state)
 		return b.Put([]byte("system_state"), data)
 	})
 }
 
-// GetSystemState retrieves the last active file, playing state, and timeout setting
-func (m *Manager) GetSystemState() (string, bool, int, error) {
-	var activeFile string
-	var playing bool
-	timeout := 5 // Default to 5 minutes
+// GetSystemState retrieves the full system state
+func (m *Manager) GetSystemState() (SystemState, error) {
+	state := SystemState{
+		Timeout:     5,      // Default to 5 minutes
+		Volume:      50,     // Default volume
+		EncoderMode: "vol",  // Default to volume mode
+	}
 	err := m.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketSystem)
 		val := b.Get([]byte("system_state"))
 		if val != nil {
-			var state map[string]any
-			if err := json.Unmarshal(val, &state); err == nil {
-				if af, ok := state["activeFile"].(string); ok {
-					activeFile = af
-				}
-				if pl, ok := state["playing"].(bool); ok {
-					playing = pl
-				}
-				// json decodes numbers to float64
-				if tm, ok := state["timeout"].(float64); ok {
-					timeout = int(tm)
-				}
-			}
+			_ = json.Unmarshal(val, &state)
 		}
 		return nil
 	})
-	return activeFile, playing, timeout, err
+	return state, err
 }

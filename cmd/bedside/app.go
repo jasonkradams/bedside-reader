@@ -21,7 +21,7 @@ type App struct {
 	player *player.Player
 
 	// State
-	scrubMode         bool
+	encoderMode       string // "vol" or "scrub"
 	inMenu            bool
 	menuIndex         int
 	menuBooks         []library.Audiobook
@@ -34,18 +34,33 @@ type App struct {
 	lastEncoderBtnTime time.Time
 }
 
-// NewApp initializes a new App controller
-func NewApp(b *bus.Bus, lib *library.Manager, gui *ui.Renderer, p *player.Player, initialTimeout int) *App {
-	return &App{
+// NewApp creates a new App controller
+func NewApp(b *bus.Bus, lib *library.Manager, gui *ui.Renderer, p *player.Player, sysState library.SystemState) *App {
+	a := &App{
 		bus:               b,
 		lib:               lib,
 		gui:               gui,
 		player:            p,
-		screenTimeoutMins: initialTimeout,
+		inMenu:            true,
+		screenTimeoutMins: sysState.Timeout,
+		encoderMode:       sysState.EncoderMode,
 	}
+
+	if a.encoderMode != "vol" && a.encoderMode != "scrub" {
+		a.encoderMode = "vol"
+	}
+
+	_ = p.SetVolume(sysState.Volume)
+
+	return a
 }
 
 // Run starts the main event loop
+func (a *App) publishMain() {
+	a.gui.SetEncoderMode(a.encoderMode)
+	a.bus.Publish(bus.EventPlayerStateChanged, a.player.State)
+}
+
 func (a *App) Run() {
 	ch := a.bus.Subscribe()
 	a.resetScreen(true) // Start the timer and wake screen
@@ -133,8 +148,7 @@ func (a *App) handleEncoderSingleClick() {
 			}
 		}
 	} else {
-		a.scrubMode = !a.scrubMode
-		a.gui.SetScrubMode(a.scrubMode)
+		a.handleEncoderToggle()
 	}
 }
 
@@ -153,7 +167,9 @@ func (a *App) cycleScreenTimeout() {
 	default:
 		a.screenTimeoutMins = 5
 	}
-	a.lib.SaveSystemState(a.player.State.FilePath, !a.player.State.Paused, a.screenTimeoutMins)
+	sysState, _ := a.lib.GetSystemState()
+	sysState.Timeout = a.screenTimeoutMins
+	_ = a.lib.SaveSystemState(sysState)
 	a.resetScreen(true)
 	a.publishMenu()
 }
@@ -161,6 +177,29 @@ func (a *App) cycleScreenTimeout() {
 func (a *App) handleScreenTimeout() {
 	a.screenOff = true
 	display.SetBacklight(false)
+}
+
+func (a *App) handleEncoderToggle() {
+	log.Println("Received EventButtonEncoderToggle")
+	if a.resetScreen(true) {
+		return
+	}
+	if a.inMenu {
+		return // Do nothing in menu
+	}
+
+	if a.encoderMode == "scrub" {
+		a.encoderMode = "vol"
+	} else {
+		a.encoderMode = "scrub"
+	}
+	
+	// Save the encoder mode to persistence
+	sysState, _ := a.lib.GetSystemState()
+	sysState.EncoderMode = a.encoderMode
+	_ = a.lib.SaveSystemState(sysState)
+	
+	a.publishMain()
 }
 
 func (a *App) handleSkipFwd() {
@@ -259,7 +298,7 @@ func (a *App) handleEncoderTurn(delta int) {
 	a.resetScreen(false) // Reset timer, don't wake
 	if a.inMenu && !a.screenOff {
 		a.handleMenuScroll(delta)
-	} else if a.scrubMode {
+	} else if a.encoderMode == "scrub" {
 		a.handleScrub(delta)
 	} else {
 		a.handleVolumeChange(delta)
@@ -283,4 +322,14 @@ func (a *App) handleScrub(delta int) {
 func (a *App) handleVolumeChange(delta int) {
 	newVol := a.player.State.Volume + float64(delta*5)
 	_ = a.player.SetVolume(newVol)
+
+	// Persist the volume setting
+	sysState, _ := a.lib.GetSystemState()
+	sysState.Volume = newVol
+	if sysState.Volume < 0 {
+		sysState.Volume = 0
+	} else if sysState.Volume > 100 {
+		sysState.Volume = 100
+	}
+	_ = a.lib.SaveSystemState(sysState)
 }

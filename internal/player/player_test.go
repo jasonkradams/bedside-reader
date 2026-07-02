@@ -98,7 +98,7 @@ func TestPlayer_Success_EndFileErrorUpdatesIdleState(t *testing.T) {
 	// To avoid starting mpv, we can use net.Pipe
 	client, server := net.Pipe()
 	p.conn = client
-	
+
 	go p.listen()
 
 	// Send an end-file event with reason "error"
@@ -116,8 +116,27 @@ func TestPlayer_Success_EndFileErrorUpdatesIdleState(t *testing.T) {
 	if !p.State.Paused {
 		t.Errorf("fail: expected State.Paused to be true after end-file with reason error, but got false")
 	}
-	
+
 	server.Close()
+}
+
+func TestPlayer_Success_HandleTimePosUpdatesPosition(t *testing.T) {
+	b := bus.New()
+	p := &Player{
+		bus:      b,
+		State:    PlaybackState{Duration: 100},
+		lastSave: time.Now(), // recent save so the periodic DB write is skipped (no lib in test)
+	}
+
+	// 42.5s into a 100s file: far from EOF, so no mute timer should be armed.
+	p.handleTimePos(42.5)
+
+	if p.State.Position != 42.5 {
+		t.Errorf("fail: expected Position to be updated to 42.5, got %v", p.State.Position)
+	}
+	if p.eofMuteTimer != nil {
+		t.Errorf("fail: expected no EOF mute timer far from end of file, but one was armed")
+	}
 }
 
 func TestPlayer_Success_MutesBeforeEOF(t *testing.T) {
@@ -144,12 +163,10 @@ func TestPlayer_Success_MutesBeforeEOF(t *testing.T) {
 
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
-	
+
 	if mp.level != gpio.Low {
 		t.Errorf("fail: expected mute pin to be Low when near EOF to prevent pop, got %v", mp.level)
 	}
 
 	server.Close()
 }
-
-

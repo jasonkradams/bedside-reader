@@ -49,11 +49,11 @@ func main() {
 	defer mpv.Close()
 
 	// Resume System State!
-	activePath, playing, screenTimeoutMins, err := lib.GetSystemState()
-	if err == nil && activePath != "" {
-		log.Printf("Resuming state: %s (Playing: %v, Timeout: %dm)", activePath, playing, screenTimeoutMins)
-		mpv.LoadFile(activePath)
-		if !playing {
+	sysState, err := lib.GetSystemState()
+	if err == nil && sysState.ActiveFile != "" {
+		log.Printf("Resuming state: %s (Playing: %v, Timeout: %dm)", sysState.ActiveFile, sysState.Playing, sysState.Timeout)
+		mpv.LoadFile(sysState.ActiveFile)
+		if !sysState.Playing {
 			mpv.TogglePause() // LoadFile automatically plays, so pause if it wasn't playing
 		}
 	} else {
@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// 6. Start the App Controller
-	app := NewApp(eventBus, lib, gui, mpv, screenTimeoutMins)
+	app := NewApp(eventBus, lib, gui, mpv, sysState)
 	go app.Run()
 
 	// 7. Trigger a periodic background scan of audiobooks
