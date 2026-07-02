@@ -47,5 +47,8 @@ Icon
 nixos.qcow2
 /keys/
 
+# NixOS Log Validation
+pi-journal*
+
 # Secrets
 wireless.env

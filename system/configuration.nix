@@ -15,6 +15,10 @@
   # ---------------------------------------------------------
 
   # We use the generic AArch64 SD image structure.
+  # Disable automatic partition expansion on first boot because resize2fs of a 60GB
+  # partition on a live rootfs causes the Pi Zero 2 W (512MB RAM) to OOM/freeze.
+  sdImage.expandOnBoot = false;
+  
   # The easiest way to apply the custom Pi boot config is to inject
   # the exact config.txt and firmware files into the FAT32 firmware partition.
   sdImage.populateFirmwareCommands = lib.mkAfter ''
