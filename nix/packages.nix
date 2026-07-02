@@ -208,7 +208,7 @@ let
       RDISK="''${DISK/disk/rdisk}"
       echo "Flashing $IMG to $RDISK..."
       echo "This requires sudo privileges."
-      zstdcat "$IMG" | sudo dd of="$RDISK" bs=1m
+      zstdcat "$IMG" | sudo dd of="$RDISK" bs=1M
       
       echo "Done! You can now eject the SD card."
     '';
