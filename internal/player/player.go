@@ -246,7 +246,7 @@ func (p *Player) handleFileLoaded() {
 	if p.mutePin != nil {
 		// Delay unmute to allow ALSA stream to settle (masks the mpv load pop)
 		go func() {
-			time.Sleep(250 * time.Millisecond)
+			time.Sleep(750 * time.Millisecond)
 			p.reqMutex.Lock()
 			defer p.reqMutex.Unlock()
 			if !p.State.Paused {
