@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
+	"github.com/jasonkradams/bedside-reader/internal/display"
 	"github.com/jasonkradams/bedside-reader/internal/library"
 	"github.com/jasonkradams/bedside-reader/internal/player"
 	"golang.org/x/image/font"
