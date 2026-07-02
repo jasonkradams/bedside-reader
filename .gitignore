@@ -45,3 +45,4 @@ Icon
 
 # Nix
 nixos.qcow2
+/keys/
