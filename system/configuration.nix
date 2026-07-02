@@ -67,6 +67,7 @@
   environment.systemPackages = [
     bedside-app
     pkgs.cog
+    pkgs.mpv
   ];
 
   # ---------------------------------------------------------
@@ -114,6 +115,11 @@
     SUBSYSTEM=="backlight", ACTION=="add", \
       RUN+="${pkgs.coreutils}/bin/chgrp video /sys/class/backlight/%k/brightness", \
       RUN+="${pkgs.coreutils}/bin/chmod g+w /sys/class/backlight/%k/brightness"
+
+    # Allow the gpio group to access gpiochip devices
+    SUBSYSTEM=="gpio", KERNEL=="gpiochip*", ACTION=="add", \
+      RUN+="${pkgs.coreutils}/bin/chgrp gpio /dev/%k", \
+      RUN+="${pkgs.coreutils}/bin/chmod g+rw /dev/%k"
   '';
 
   # Bedside Go Backend Service
@@ -121,6 +127,8 @@
     description = "Bedside Audiobook Player";
     after = [ "sound.target" ];
     wantedBy = [ "multi-user.target" ];
+    
+    path = [ pkgs.mpv ];
 
     serviceConfig = {
       Type = "notify";
