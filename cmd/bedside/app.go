@@ -41,7 +41,7 @@ func NewApp(b *bus.Bus, lib *library.Manager, gui *ui.Renderer, p *player.Player
 		lib:               lib,
 		gui:               gui,
 		player:            p,
-		inMenu:            true,
+		inMenu:            sysState.ActiveFile == "",
 		screenTimeoutMins: sysState.Timeout,
 		encoderMode:       sysState.EncoderMode,
 	}
@@ -51,6 +51,7 @@ func NewApp(b *bus.Bus, lib *library.Manager, gui *ui.Renderer, p *player.Player
 	}
 
 	_ = p.SetVolume(sysState.Volume)
+	a.gui.SetEncoderMode(a.encoderMode)
 
 	return a
 }
