@@ -88,18 +88,26 @@
 
   # We read the user's wireless.env file from the FAT32 boot partition
   # to dynamically configure Wi-Fi without hardcoding credentials in Nix.
-  systemd.services."wpa_supplicant-wlan0".preStart = lib.mkBefore ''
-    if [ -f /boot/firmware/wireless.env ]; then
-      # Source the environment variables safely
-      # shellcheck source=/dev/null
-      source /boot/firmware/wireless.env
-      # Generate the wpa_supplicant configuration block
-      printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /run/wireless.conf
-    else
-      # If no file exists, create an empty one so the include doesn't crash
-      touch /run/wireless.conf
-    fi
-  '';
+  # This runs as a separate oneshot service before wpa_supplicant so the file
+  # exists when systemd sets up the wpa_supplicant mount namespaces.
+  systemd.services.bedside-wifi-setup = {
+    description = "Generate Wi-Fi config from FAT32 boot partition";
+    before = [ "wpa_supplicant-wlan0.service" ];
+    wantedBy = [ "wpa_supplicant-wlan0.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      if [ -f /boot/firmware/wireless.env ]; then
+        # shellcheck source=/dev/null
+        source /boot/firmware/wireless.env
+        printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /run/wireless.conf
+      else
+        touch /run/wireless.conf
+      fi
+    '';
+  };
 
   # Tell wpa_supplicant to load our dynamically generated config
   networking.wireless.extraConfigFiles = [ "/run/wireless.conf" ];

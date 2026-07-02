@@ -40,12 +40,14 @@ arm_boost=1
 # MAX98357A speaks the same I2S protocol as HiFiBerry's DAC
 dtoverlay=hifiberry-dac
 
-# Display HAT Mini — ST7789V via SPI, driven through the upstream
-# mipi-dbi-spi DRM driver so Cog/KMS can render to it directly.
+# Display HAT Mini — ST7789V via SPI
 dtoverlay=mipi-dbi-spi,spi0-1,speed=60000000
 dtparam=compatible=sitronix\,st7789v\0panel-mipi-dbi-spi
 dtparam=width=320,height=240,width-mm=43,height-mm=27
-dtparam=dc-gpio=9,backlight-gpio=13
+dtparam=dc-gpio=9
+
+# Explicitly create a backlight sysfs node for GPIO 13
+dtoverlay=gpio-backlight,gpio=13,active_low=0
 
 # Hardware watchdog (Zero 2 W has BCM2837 watchdog)
 dtparam=watchdog=on
