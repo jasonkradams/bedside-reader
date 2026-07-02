@@ -146,7 +146,7 @@ let
       echo "Starting macOS linux-builder VM (requires sudo for the network interface)..."
       # We explicitly inject QEMU_OPTS to disable SME (Scalable Matrix Extension) 
       # which causes a known HVF assertion failure on Apple Silicon M3/M4 chips.
-      export QEMU_OPTS="-cpu max,sme=off"
+      export QEMU_OPTS="-cpu host,sme=off"
       nix run nixpkgs#darwin.linux-builder
     '';
   };
