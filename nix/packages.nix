@@ -170,6 +170,7 @@ let
   };
 
 in
+{
   inherit
     ffmpeg
     audible-convert
