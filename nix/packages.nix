@@ -138,12 +138,22 @@ let
         nixos/nix:latest \
         bash -c "
           set -e
+          
+          # By building into a managed Nix profile inside the persistent volume, we create
+          # a trusted Garbage Collection root that belongs to root, bypassing macOS ownership issues.
+          # We can then safely delete old generations to free up disk space while keeping 
+          # the most recent build's dependencies (kernel, toolchains) perfectly cached.
+          
+          echo 'Cleaning up old build generations to prevent out-of-space errors...'
+          nix-collect-garbage -d >/dev/null 2>&1 || true
+          
           echo 'Building image...'
-          nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage
+          nix build --profile /nix/var/nix/profiles/bedside-pi --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage
+          
           echo 'Copying image out of container...'
           mkdir -p result-img
           rm -rf result-img/*.img*
-          cp -L result/sd-image/*.img* result-img/
+          cp -L /nix/var/nix/profiles/bedside-pi/sd-image/*.img* result-img/
           chmod 644 result-img/*.img*
         "
       
