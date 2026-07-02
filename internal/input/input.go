@@ -23,8 +23,16 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 	m := &InputManager{
 		bus: eventBus,
 	}
+	m.setupButtons()
+	m.setupEncoder()
 
-	// Map the Display HAT Mini buttons
+	return m, nil
+}
+
+// setupButtons wires the Display HAT Mini buttons to their bus events, spawning
+// a watcher goroutine per pin. Missing or unconfigurable pins are logged and
+// skipped so a partially-connected HAT still works.
+func (m *InputManager) setupButtons() {
 	buttons := []struct {
 		Name  string
 		Pin   string
@@ -48,24 +56,26 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 		}
 		go m.watchButton(pin, b.Event)
 	}
+}
 
-	// Start Rotary Encoder (GPIO 4, 20, 23)
+// setupEncoder wires the rotary encoder (GPIO 4, 20, 23) and spawns its watcher
+// goroutines. If any of the three pins is missing, the encoder is skipped.
+func (m *InputManager) setupEncoder() {
 	pinA := gpioreg.ByName("GPIO4")
 	pinB := gpioreg.ByName("GPIO20")
 	pinBtn := gpioreg.ByName("GPIO23")
 
-	if pinA != nil && pinB != nil && pinBtn != nil {
-		pinA.In(gpio.PullUp, gpio.NoEdge)
-		pinB.In(gpio.PullUp, gpio.NoEdge)
-		pinBtn.In(gpio.PullUp, gpio.NoEdge)
-
-		go m.watchEncoder(pinA, pinB)
-		go m.watchButton(pinBtn, bus.EventEncoderBtn)
-	} else {
+	if pinA == nil || pinB == nil || pinBtn == nil {
 		log.Println("Warning: Failed to find Rotary Encoder pins")
+		return
 	}
 
-	return m, nil
+	pinA.In(gpio.PullUp, gpio.NoEdge)
+	pinB.In(gpio.PullUp, gpio.NoEdge)
+	pinBtn.In(gpio.PullUp, gpio.NoEdge)
+
+	go m.watchEncoder(pinA, pinB)
+	go m.watchButton(pinBtn, bus.EventEncoderBtn)
 }
 
 func (m *InputManager) watchEncoder(pinA, pinB gpio.PinIO) {
