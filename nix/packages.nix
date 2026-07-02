@@ -127,8 +127,9 @@ let
       # We use Docker to evaluate and build the NixOS image natively on the Linux VM.
       # This entirely bypasses the flaky macOS Nix daemon and QEMU HVF bugs.
       
-      # Create a persistent volume for the Nix store so subsequent builds are fast
-      docker volume create nixos-builder-store >/dev/null || true
+      echo "Cleaning up previous build cache to prevent out-of-space errors..."
+      docker volume rm nixos-builder-store >/dev/null 2>&1 || true
+      docker volume create nixos-builder-store >/dev/null
       
       echo "Starting builder container (this may take a while to download/compile)..."
       docker run --rm \
