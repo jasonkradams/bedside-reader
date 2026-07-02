@@ -174,7 +174,21 @@ func (a *App) handleSkipFwd() {
 			a.publishMenu()
 		}
 	} else {
-		a.player.SkipChapter(1)
+		// Prevent skipping past the last chapter
+		if b, err := a.lib.GetByFilename(a.player.State.FilePath); err == nil {
+			currentChapterIdx := -1
+			for i, chap := range b.Chapters {
+				if a.player.State.Position >= chap.StartTime-0.5 {
+					currentChapterIdx = i
+				} else {
+					break
+				}
+			}
+			if currentChapterIdx >= len(b.Chapters)-1 {
+				return // We are on the last chapter, do not skip forward
+			}
+		}
+		_ = a.player.SkipChapter(1)
 	}
 }
 

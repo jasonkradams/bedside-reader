@@ -142,14 +142,14 @@ func (p *Player) listen() {
 				p.handleFileLoaded()
 			case "end-file":
 				p.reqMutex.Lock()
-				// Only trigger end-file if it actually finished playing naturally
+				p.isIdle = true
+				p.State.Paused = true
+				// Only reset progress to 0 if it actually finished playing naturally
 				if reason, ok := msg["reason"].(string); ok && reason == "eof" {
-					p.isIdle = true
-					p.State.Paused = true
 					p.State.Position = 0
 					p.lib.SaveProgress(p.State.FilePath, 0)
-					p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 				}
+				p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 				p.reqMutex.Unlock()
 			case "property-change":
 				name, _ := msg["name"].(string)
@@ -195,11 +195,15 @@ func (p *Player) handleFileLoaded() {
 
 	// Unmute the audio now that the file is fully loaded and ready to play
 	p.sendCommandNoLock("set_property", "mute", false)
-	if p.mutePin != nil && !p.State.Paused {
+	if p.mutePin != nil {
 		// Delay unmute to allow ALSA stream to settle (masks the mpv load pop)
 		go func() {
-			time.Sleep(100 * time.Millisecond)
-			p.mutePin.Out(gpio.High) // Hardware Unmute
+			time.Sleep(250 * time.Millisecond)
+			p.reqMutex.Lock()
+			defer p.reqMutex.Unlock()
+			if !p.State.Paused {
+				_ = p.mutePin.Out(gpio.High) // Hardware Unmute
+			}
 		}()
 	}
 

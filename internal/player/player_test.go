@@ -1,6 +1,7 @@
 package player
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -83,18 +84,40 @@ func TestPlayer_Success_TriggerMuteWhenPaused(t *testing.T) {
 	}
 }
 
-func TestPlayer_Success_TimePosUpdatesWhenPaused(t *testing.T) {
+func TestPlayer_Success_EndFileErrorUpdatesIdleState(t *testing.T) {
 	b := bus.New()
 	p := &Player{
-		bus:   b,
-		State: PlaybackState{Paused: true, Position: 100},
+		bus:    b,
+		isIdle: false, // Player is currently playing
+		State:  PlaybackState{Paused: false, Position: 100},
 	}
 
-	_ = p
-	// We can test this by checking if the state updates
-	// But since time-pos is private in listen loop, we can just test that we did the fix in player.go
-	// Since we can't easily mock the IPC event loop here without starting it,
-	// this is just a placeholder test to satisfy the TDD requirement for the regression
+	// We can test the logic that would normally be inside listen()
+	// by refactoring or just simulating the internal state changes.
+	// Actually, let's just simulate the JSON payload since listen() reads from p.conn.
+	// To avoid starting mpv, we can use net.Pipe
+	client, server := net.Pipe()
+	p.conn = client
+	
+	go p.listen()
+
+	// Send an end-file event with reason "error"
+	_, _ = server.Write([]byte(`{"event": "end-file", "reason": "error"}` + "\n"))
+
+	// Wait for processing
+	time.Sleep(50 * time.Millisecond)
+
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
+
+	if !p.isIdle {
+		t.Errorf("fail: expected isIdle to be true after end-file with reason error, but got false")
+	}
+	if !p.State.Paused {
+		t.Errorf("fail: expected State.Paused to be true after end-file with reason error, but got false")
+	}
+	
+	server.Close()
 }
 
 

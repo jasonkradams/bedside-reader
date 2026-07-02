@@ -191,6 +191,12 @@ func (r *Renderer) renderPlayer() {
 		b, err := r.lib.GetByFilename(r.playState.FilePath)
 		if err == nil {
 			book = b
+			
+			// Default chapterEnd to book duration in case mpv hasn't loaded duration yet
+			chapterEnd = book.Duration
+			if chapterEnd == 0 {
+				chapterEnd = r.playState.Duration // ultimate fallback
+			}
 
 			// Find current chapter
 			for i, chap := range book.Chapters {
@@ -199,6 +205,11 @@ func (r *Renderer) renderPlayer() {
 					chapterStart = chap.StartTime
 					if i+1 < len(book.Chapters) {
 						chapterEnd = book.Chapters[i+1].StartTime
+					} else {
+						// Last chapter, use book duration
+						if book.Duration > 0 {
+							chapterEnd = book.Duration
+						}
 					}
 				} else {
 					break
