@@ -1,6 +1,6 @@
 module github.com/jasonkradams/bedside-reader
 
-go 1.26.4
+go 1.26.3
 
 require (
 	github.com/coreos/go-systemd/v22 v22.7.0
