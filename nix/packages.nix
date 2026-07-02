@@ -136,7 +136,7 @@ let
         -v nixos-builder-store:/nix \
         -w /workspace \
         nixos/nix:latest \
-        bash -c "
+        sh -c "
           set -e
           
           # By building into a managed Nix profile inside the persistent volume, we create
