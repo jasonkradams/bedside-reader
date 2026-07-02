@@ -23,17 +23,40 @@ A custom-built bedside clock and audiobook player designed for distraction-free 
 - **System Integration:** Systemd services and custom udev rules
 - **CAD Automation:** Python (Fusion 360 API)
 
-## Building
+## Development & Deployment
 
-This project uses [Nix](https://nixos.org/) for development and builds.
+This project uses [Nix](https://nixos.org/) for development and builds. We use a declarative `flake.nix` that completely defines the development shell, application compilation, and the NixOS operating system image.
+
+### Getting Started
+
+The project is configured for `direnv`. When you enter the directory, your development environment will automatically configure itself.
 
 ```bash
-# Enter the development environment
-nix develop
-
-# Build the Go binary
-just build
+# Allow direnv to load the flake
+direnv allow
 ```
+
+Once loaded, the following commands are instantly available in your shell:
+
+- `audible-convert`: Convert Audible `.aax` files to `.m4b` via a pinned `ffmpeg` binary.
+- `deploy`: Build the Go binary and deploy it to a running Raspberry Pi over SSH.
+- `start-builder`: Start a macOS Linux Builder VM (required to cross-build NixOS on a Mac).
+- `build-os`: Build the full bootable AArch64 NixOS SD Card image.
+- `stage-boot`: Copy raw boot configuration files to an existing mounted SD card.
+
+### Building the NixOS SD Card Image
+
+To compile the entire operating system image from your Mac:
+
+1. Open a new terminal tab and start the builder VM (this uses NixOS 24.05 to avoid a known QEMU bug on Apple Silicon):
+   ```bash
+   start-builder
+   ```
+2. In your primary terminal, trigger the build:
+   ```bash
+   build-os
+   ```
+3. The resulting `.img.zst` file will be deposited in `./result/sd-image/`. Flash it to your SD card using a tool like BalenaEtcher or `dd`.
 
 ## 3D Printing the Enclosure
 

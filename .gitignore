@@ -42,3 +42,6 @@ Icon
 .idea/
 *.swp
 *.swo
+
+# Nix
+nixos.qcow2
