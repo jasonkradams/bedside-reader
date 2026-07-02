@@ -41,6 +41,14 @@
             type = "app";
             program = "${self.packages.${system}.deploy}/bin/deploy";
           };
+          start-builder = {
+            type = "app";
+            program = "${self.packages.${system}.start-builder}/bin/start-builder";
+          };
+          build-os = {
+            type = "app";
+            program = "${self.packages.${system}.build-os}/bin/build-os";
+          };
         }
       );
 
@@ -51,6 +59,8 @@
               self.packages.${system}.ffmpeg
               self.packages.${system}.stage-boot
               self.packages.${system}.deploy
+              self.packages.${system}.start-builder
+              self.packages.${system}.build-os
               pkgs.go
             ];
           };

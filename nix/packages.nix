@@ -136,8 +136,27 @@ let
     vendorHash = "sha256-jJLJ/WK+YHIcg+N+Jvp6v6RHQxw/XxvXL5MIQbarZns=";
   };
 
+  # Script to start the macOS Linux Builder VM
+  start-builder = pkgs.writeShellApplication {
+    name = "start-builder";
+    text = ''
+      echo "Starting macOS linux-builder VM (requires sudo for the network interface)..."
+      nix run nixpkgs#darwin.linux-builder
+    '';
+  };
+
+  # Script to build the NixOS SD card image
+  build-os = pkgs.writeShellApplication {
+    name = "build-os";
+    text = ''
+      echo "Building NixOS SD Card Image for AArch64 (requires linux-builder to be running)..."
+      nix build .#nixosConfigurations.bedside-pi.config.system.build.sdImage --system aarch64-linux
+      echo "Done! Image is located at: ./result/sd-image/"
+    '';
+  };
+
 in
 {
-  inherit ffmpeg audible-convert stage-boot deploy bedside-app;
+  inherit ffmpeg audible-convert stage-boot deploy bedside-app start-builder build-os;
   default = audible-convert;
 }
