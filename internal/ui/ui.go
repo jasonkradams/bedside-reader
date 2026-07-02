@@ -296,17 +296,16 @@ func (r *Renderer) resolveChapter(book *library.Audiobook) chapterInfo {
 		info.end = r.playState.Duration // ultimate fallback
 	}
 
-	for i, chap := range book.Chapters {
-		if r.playState.Position < chap.StartTime-0.5 {
-			break
-		}
-		info.title = chap.Title
-		info.start = chap.StartTime
-		if i+1 < len(book.Chapters) {
-			info.end = book.Chapters[i+1].StartTime
-		} else if book.Duration > 0 {
-			info.end = book.Duration
-		}
+	idx := library.ChapterIndexAt(book.Chapters, r.playState.Position)
+	if idx < 0 {
+		return info // before the first chapter
+	}
+	info.title = book.Chapters[idx].Title
+	info.start = book.Chapters[idx].StartTime
+	if idx+1 < len(book.Chapters) {
+		info.end = book.Chapters[idx+1].StartTime
+	} else if book.Duration > 0 {
+		info.end = book.Duration
 	}
 	return info
 }
@@ -429,9 +428,9 @@ func copyToRGB565(dst []byte, src *image.RGBA) {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	offset := 0
-	for y := 0; y < h; y++ {
+	for y := range h {
 		srcOffset := src.PixOffset(0, y)
-		for x := 0; x < w; x++ {
+		for range w {
 			r := src.Pix[srcOffset]
 			g := src.Pix[srcOffset+1]
 			b := src.Pix[srcOffset+2]
