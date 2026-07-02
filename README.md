@@ -40,23 +40,15 @@ Once loaded, the following commands are instantly available in your shell:
 
 - `audible-convert`: Convert Audible `.aax` files to `.m4b` via a pinned `ffmpeg` binary.
 - `deploy`: Build the Go binary and deploy it to a running Raspberry Pi over SSH.
-- `start-builder`: Start a macOS Linux Builder VM (required to cross-build NixOS on a Mac).
-- `build-os`: Build the full bootable AArch64 NixOS SD Card image.
+- `build-os`: Build the full bootable AArch64 NixOS SD Card image natively using Docker.
+- `flash-os`: Unmounts and flashes the compiled NixOS `.img.zst` safely to an SD card (macOS only).
 - `stage-boot`: Copy raw boot configuration files to an existing mounted SD card.
 
 ### Building the NixOS SD Card Image
 
-To compile the entire operating system image from your Mac:
+Building the OS from scratch on macOS utilizes a seamless Docker container to natively cross-compile the Linux kernel for the Raspberry Pi using Apple's Virtualization.framework. 
 
-1. Open a new terminal tab and start the builder VM (this uses NixOS 24.05 to avoid a known QEMU bug on Apple Silicon):
-   ```bash
-   start-builder
-   ```
-2. In your primary terminal, trigger the build:
-   ```bash
-   build-os
-   ```
-3. The resulting `.img.zst` file will be deposited in `./result/sd-image/`. Flash it to your SD card using a tool like BalenaEtcher or `dd`.
+For the full step-by-step runbook on compiling the OS, allocating resources to Docker, and flashing the SD card, please refer to the **[OS Bootstrapping Guide](docs/BOOTSTRAP.md)**.
 
 ## 3D Printing the Enclosure
 

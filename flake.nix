@@ -60,6 +60,7 @@
               self.packages.${system}.stage-boot
               self.packages.${system}.deploy
               self.packages.${system}.build-os
+              self.packages.${system}.flash-os
               self.packages.${system}.go_1_26_4
             ];
           };

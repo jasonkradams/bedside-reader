@@ -182,6 +182,38 @@ let
     '';
   };
 
+  # Script to flash the compiled NixOS image to an SD card (macOS only)
+  flash-os = pkgs.writeShellApplication {
+    name = "flash-os";
+    runtimeInputs = [ pkgs.zstd ];
+    text = ''
+      DISK="''${1:-}"
+      if [ -z "$DISK" ]; then
+        echo "Error: You must specify the target disk (e.g., /dev/disk12)"
+        echo "Usage: flash-os /dev/disk12"
+        echo "Run 'diskutil list' to find your SD card."
+        exit 1
+      fi
+      
+      IMG=$(ls result-img/nixos-image-*.img.zst 2>/dev/null | head -n 1 || true)
+      if [ -z "$IMG" ]; then
+        echo "Error: No compressed image found in result-img/ directory."
+        echo "Did you run 'build-os' first?"
+        exit 1
+      fi
+
+      echo "Unmounting $DISK..."
+      diskutil unmountDisk "$DISK" || true
+
+      RDISK="''${DISK/disk/rdisk}"
+      echo "Flashing $IMG to $RDISK..."
+      echo "This requires sudo privileges."
+      zstdcat "$IMG" | sudo dd of="$RDISK" bs=1m
+      
+      echo "Done! You can now eject the SD card."
+    '';
+  };
+
 in
 {
   inherit
@@ -191,6 +223,7 @@ in
     deploy
     bedside-app
     build-os
+    flash-os
     go_1_26_4
     ;
   default = audible-convert;
