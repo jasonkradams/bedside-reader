@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"github.com/jasonkradams/bedside-reader/internal/library"
@@ -44,9 +45,10 @@ type Renderer struct {
 	mu     sync.Mutex
 
 	// Local state
-	playState   player.PlaybackState
-	menuState   bus.MenuState
-	encoderMode string
+	playState     player.PlaybackState
+	menuState     bus.MenuState
+	encoderMode   string
+	wifiConnected bool
 }
 
 func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
@@ -84,6 +86,7 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 	}
 
 	go r.listen()
+	go r.pollWiFi()
 	r.render() // initial render
 
 	return r, nil
@@ -95,6 +98,27 @@ func (r *Renderer) Close() {
 	}
 	if r.fbFile != nil {
 		r.fbFile.Close()
+	}
+}
+
+func (r *Renderer) pollWiFi() {
+	for {
+		connected := false
+		data, err := os.ReadFile("/sys/class/net/wlan0/carrier")
+		if err == nil && len(data) > 0 && data[0] == '1' {
+			connected = true
+		}
+		
+		r.mu.Lock()
+		changed := r.wifiConnected != connected
+		r.wifiConnected = connected
+		r.mu.Unlock()
+
+		if changed {
+			r.render()
+		}
+
+		time.Sleep(2 * time.Second)
 	}
 }
 
@@ -132,6 +156,7 @@ func (r *Renderer) render() {
 	if r.menuState.Active {
 		r.renderMenu()
 	}
+	r.drawWiFiIcon(300, 10, r.wifiConnected)
 
 	// Copy to hardware
 	copyToRGB565(r.mmap, r.canvas)
@@ -421,6 +446,26 @@ func addLabel(img *image.RGBA, x, y int, label string, col color.RGBA) {
 		Dot:  point,
 	}
 	d.DrawString(label)
+}
+
+func (r *Renderer) drawWiFiIcon(x, y int, connected bool) {
+	// Draw a simple antenna/signal icon
+	col := color.RGBA{100, 255, 100, 255}
+	if !connected {
+		col = color.RGBA{255, 100, 100, 255}
+	}
+
+	// Draw 3 vertical bars like a signal meter
+	fillRect(r.canvas, x, y+6, 2, 4, col)
+	fillRect(r.canvas, x+4, y+3, 2, 7, col)
+	fillRect(r.canvas, x+8, y, 2, 10, col)
+
+	if !connected {
+		// Draw a red 'X' or crossout over it
+		c := color.RGBA{255, 0, 0, 255}
+		fillRect(r.canvas, x-1, y+4, 12, 2, c)
+		fillRect(r.canvas, x+4, y-1, 2, 12, c)
+	}
 }
 
 // copyToRGB565 converts the RGBA canvas to RGB565 and writes it to the mmap.
