@@ -66,11 +66,22 @@
   # Networking & Wi-Fi
   # ---------------------------------------------------------
 
-  networking.wireless.enable = true;
+  networking.wireless = {
+    enable = true;
+    interfaces = [ "wlan0" ];
+    # Define a dummy network so NixOS generates the wpa_supplicant systemd service.
+    # Our preStart script below will inject the real configuration dynamically.
+    networks = {
+      "dummy-force-service-creation" = {};
+    };
+  };
+
+  # Use DHCP on wlan0 once connected
+  networking.interfaces.wlan0.useDHCP = true;
 
   # We read the user's wireless.env file from the FAT32 boot partition
   # to dynamically configure Wi-Fi without hardcoding credentials in Nix.
-  systemd.services.wpa_supplicant.preStart = lib.mkBefore ''
+  systemd.services."wpa_supplicant-wlan0".preStart = lib.mkBefore ''
     if [ -f /boot/firmware/wireless.env ]; then
       # Source the environment variables safely
       # shellcheck source=/dev/null
@@ -101,11 +112,7 @@
   # Bedside Go Backend Service
   systemd.services.bedside = {
     description = "Bedside Audiobook Player";
-    after = [
-      "network-online.target"
-      "sound.target"
-    ];
-    wants = [ "network-online.target" ];
+    after = [ "sound.target" ];
     wantedBy = [ "multi-user.target" ];
 
     serviceConfig = {
