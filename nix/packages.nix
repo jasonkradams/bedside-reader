@@ -139,55 +139,43 @@ let
     vendorHash = "sha256-jJLJ/WK+YHIcg+N+Jvp6v6RHQxw/XxvXL5MIQbarZns=";
   };
 
-  # Script to start the macOS Linux Builder VM
-  start-builder = pkgs.writeShellApplication {
-    name = "start-builder";
-    text = ''
-      # We explicitly use the older nixos-24.05 channel for the builder because 
-      # it ships QEMU 8.2.7. QEMU 9.0+ has a known fatal HVF memory corruption bug 
-      # on Apple Silicon M3/M4 that causes random SQLite and gzip decompression failures
-      # when using -cpu max.
-      unset QEMU_OPTS
-      nix run github:NixOS/nixpkgs/nixos-24.05#darwin.linux-builder
-    '';
-  };
-
-  # Script to build the NixOS SD card image
+  # Script to build the NixOS SD card image natively via Docker / Rancher Desktop / OrbStack
   build-os = pkgs.writeShellApplication {
     name = "build-os";
     text = ''
-      echo "Building NixOS SD Card Image for AArch64 (requires linux-builder to be running)..."
+      echo "Building NixOS SD Card Image for AArch64 using Docker native Virtualization.framework..."
       
-      # The local macOS Nix daemon crashes when evaluating complex flakes over ssh-ng://
-      # So we bypass the local daemon completely by rsyncing the source to the builder and building natively!
-      export SSH_OPTS="-o StrictHostKeyChecking=no -i ''${PWD}/keys/builder_ed25519 -p 31022"
+      # We use Docker to evaluate and build the NixOS image natively on the Linux VM.
+      # This entirely bypasses the flaky macOS Nix daemon and QEMU HVF bugs.
       
-      echo "Copying source to linux-builder..."
-      # shellcheck disable=SC2086
-      rsync -a --exclude=.git --exclude=result --exclude=nixos.qcow2 -e "ssh $SSH_OPTS" . builder@localhost:~/src/
+      # Create a persistent volume for the Nix store so subsequent builds are fast
+      docker volume create nixos-builder-store >/dev/null || true
       
-      echo "Building on linux-builder (this will take a while)..."
-      # shellcheck disable=SC2086
-      ssh $SSH_OPTS builder@localhost "cd ~/src && nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage"
+      echo "Starting builder container (this may take a while to download/compile)..."
+      docker run --rm \
+        -v "$PWD":/workspace \
+        -v nixos-builder-store:/nix \
+        -w /workspace \
+        nixos/nix:latest \
+        bash -c "
+          set -e
+          nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage
+          echo 'Copying image out of container...'
+          mkdir -p result-img
+          cp -L result/sd-image/*.img* result-img/
+        "
       
-      echo "Copying built image back to macOS..."
-      mkdir -p result
-      # shellcheck disable=SC2086
-      rsync -a -e "ssh $SSH_OPTS" builder@localhost:~/src/result/ result/
-      
-      echo "Done! Image is located at: ./result/sd-image/"
+      echo "Done! Image is located at: ./result-img/"
     '';
   };
 
 in
-{
   inherit
     ffmpeg
     audible-convert
     stage-boot
     deploy
     bedside-app
-    start-builder
     build-os
     ;
   default = audible-convert;
