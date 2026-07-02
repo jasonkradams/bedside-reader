@@ -175,7 +175,9 @@ let
           nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage
           echo 'Copying image out of container...'
           mkdir -p result-img
+          rm -rf result-img/*.img*
           cp -L result/sd-image/*.img* result-img/
+          chmod 644 result-img/*.img*
         "
       
       echo "Done! Image is located at: ./result-img/"
