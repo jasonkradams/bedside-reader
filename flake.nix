@@ -1,10 +1,17 @@
 {
   description = "Decrypt Audible .aax audiobooks into DRM-free .m4b with a minimal, source-built ffmpeg";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixos-hardware.url = "github:NixOS/nixos-hardware/master";
+    nixos-generators = {
+      url = "github:nix-community/nixos-generators";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, nixos-hardware, nixos-generators }:
     let
       systems = [
         "aarch64-darwin"
@@ -161,9 +168,17 @@
               echo "Deployment complete! Service bedside.service restarted."
             '';
           };
+          # Bedside App Go Binary
+          bedside-app = pkgs.buildGoModule {
+            pname = "bedside-app";
+            version = "1.0.0";
+            src = ./app;
+            vendorHash = "sha256-jJLJ/WK+YHIcg+N+Jvp6v6RHQxw/XxvXL5MIQbarZns=";
+            # If subpackages aren't specified, buildGoModule builds everything, which is fine
+          };
         in
         {
-          inherit ffmpeg audible-convert stage-boot deploy;
+          inherit ffmpeg audible-convert stage-boot deploy bedside-app;
           default = audible-convert;
         }
       );
@@ -197,5 +212,21 @@
           };
         }
       );
+
+      nixosConfigurations = {
+        bedside-pi = nixpkgs.lib.nixosSystem {
+          system = "aarch64-linux";
+          specialArgs = {
+            inherit self;
+            bedside-app = self.packages.aarch64-linux.bedside-app;
+          };
+          modules = [
+            "${nixpkgs}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
+            nixos-hardware.nixosModules.raspberry-pi-3
+            ./system/configuration.nix
+          ];
+        };
+      };
+
     };
 }
