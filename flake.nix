@@ -59,7 +59,6 @@
               self.packages.${system}.ffmpeg
               self.packages.${system}.stage-boot
               self.packages.${system}.deploy
-              self.packages.${system}.start-builder
               self.packages.${system}.build-os
               pkgs.go
             ];
