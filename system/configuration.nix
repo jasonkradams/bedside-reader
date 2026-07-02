@@ -19,6 +19,13 @@
   # partition on a live rootfs causes the Pi Zero 2 W (512MB RAM) to OOM/freeze.
   sdImage.expandOnBoot = false;
   
+  # Mount the FAT32 boot partition so we can read the wifi config
+  fileSystems."/boot/firmware" = {
+    device = "/dev/disk/by-label/BEDSIDEBOOT";
+    fsType = "vfat";
+    options = [ "nofail" ];
+  };
+  
   # Give the FAT32 boot partition a better name (max 11 chars)
   sdImage.firmwarePartitionName = "BEDSIDEBOOT";
   
