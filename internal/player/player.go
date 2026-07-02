@@ -32,8 +32,9 @@ type Player struct {
 	lastSave    time.Time
 	isIdle      bool
 
-	mutePin   gpio.PinOut
-	muteTimer *time.Timer
+	mutePin      gpio.PinOut
+	muteTimer    *time.Timer
+	eofMuteTimer *time.Timer
 
 	State PlaybackState
 
@@ -163,9 +164,20 @@ func (p *Player) listen() {
 						p.bus.Publish(bus.EventPlayerProgressTick, p.State)
 						
 						// Mute the hardware slightly before the file naturally ends to mask the ALSA pop
-						if p.State.Duration > 0 && p.State.Position >= p.State.Duration-0.2 {
-							if p.mutePin != nil {
-								_ = p.mutePin.Out(gpio.Low)
+						if p.State.Duration > 0 {
+							remaining := p.State.Duration - p.State.Position
+							if remaining > 0 && remaining <= 3.0 && p.eofMuteTimer == nil {
+								delay := remaining - 0.25 // Mute 250ms before EOF
+								if delay < 0 {
+									delay = 0
+								}
+								p.eofMuteTimer = time.AfterFunc(time.Duration(delay*float64(time.Second)), func() {
+									if p.mutePin != nil {
+										_ = p.mutePin.Out(gpio.Low)
+									}
+								})
+							} else if remaining > 3.0 {
+								p.cancelEofMuteTimer()
 							}
 						}
 
@@ -200,6 +212,7 @@ func (p *Player) handleFileLoaded() {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
 	p.isIdle = false
+	p.cancelEofMuteTimer()
 
 	// Unmute the audio now that the file is fully loaded and ready to play
 	p.sendCommandNoLock("set_property", "mute", false)
@@ -352,6 +365,7 @@ func (p *Player) Seek(deltaSeconds float64) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
 
+	p.cancelEofMuteTimer()
 	p.triggerMute()
 	return p.sendCommandNoLock("seek", deltaSeconds, "relative", "exact")
 }
@@ -361,6 +375,7 @@ func (p *Player) SkipChapter(delta int) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
 
+	p.cancelEofMuteTimer()
 	p.triggerMute()
 	return p.sendCommandNoLock("add", "chapter", delta)
 }
@@ -373,6 +388,13 @@ func (p *Player) SetVolume(volume float64) error {
 		volume = 100
 	}
 	return p.sendCommand("set_property", "volume", volume)
+}
+
+func (p *Player) cancelEofMuteTimer() {
+	if p.eofMuteTimer != nil {
+		p.eofMuteTimer.Stop()
+		p.eofMuteTimer = nil
+	}
 }
 
 // Close kills the mpv process
