@@ -21,6 +21,10 @@
   
   # Give the FAT32 boot partition a better name (max 11 chars)
   sdImage.firmwarePartitionName = "BEDSIDEBOOT";
+
+  # Disable extremely heavy filesystems like ZFS and Btrfs which are enabled by default
+  # in NixOS. Loading ZFS modules and daemons on a 512MB Pi Zero causes instant OOM freezes!
+  boot.supportedFilesystems = lib.mkForce [ "vfat" "ext4" ];
   
   # The easiest way to apply the custom Pi boot config is to inject
   # the exact config.txt and firmware files into the FAT32 firmware partition.
@@ -132,9 +136,10 @@
 
     serviceConfig = {
       Type = "notify";
-      # Export GPIO 13 (backlight) as root before starting, and make it writable by nobody
+      # Export GPIO 13 (backlight) as root before starting, and make it writable by nobody.
+      # If sysfs fails (e.g. pin already claimed by kernel pinctrl), we ignore it and continue.
       ExecStartPre = [
-        "+${pkgs.bash}/bin/bash -c 'if [ ! -d /sys/class/gpio/gpio13 ]; then echo 13 > /sys/class/gpio/export; sleep 0.1; fi; echo out > /sys/class/gpio/gpio13/direction; chown nobody:video /sys/class/gpio/gpio13/value'"
+        "+${pkgs.bash}/bin/bash -c 'if [ ! -d /sys/class/gpio/gpio13 ]; then echo 13 > /sys/class/gpio/export || true; sleep 0.1; fi; echo out > /sys/class/gpio/gpio13/direction || true; chown nobody:video /sys/class/gpio/gpio13/value || true'"
       ];
       ExecStart = "${bedside-app}/bin/bedside";
       Restart = "always";
