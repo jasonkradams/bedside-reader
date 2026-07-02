@@ -152,21 +152,27 @@ func (a *App) handleEncoderSingleClick() {
 	}
 }
 
-func (a *App) cycleScreenTimeout() {
-	switch a.screenTimeoutMins {
+// nextScreenTimeout advances the screen-timeout setting (in minutes) through the
+// cycle 0 (off), 1, 5, 15, 60, and back to 0. Unrecognized values reset to 5.
+func nextScreenTimeout(current int) int {
+	switch current {
 	case 0:
-		a.screenTimeoutMins = 1
+		return 1
 	case 1:
-		a.screenTimeoutMins = 5
+		return 5
 	case 5:
-		a.screenTimeoutMins = 15
+		return 15
 	case 15:
-		a.screenTimeoutMins = 60
+		return 60
 	case 60:
-		a.screenTimeoutMins = 0
+		return 0
 	default:
-		a.screenTimeoutMins = 5
+		return 5
 	}
+}
+
+func (a *App) cycleScreenTimeout() {
+	a.screenTimeoutMins = nextScreenTimeout(a.screenTimeoutMins)
 	sysState, _ := a.lib.GetSystemState()
 	sysState.Timeout = a.screenTimeoutMins
 	_ = a.lib.SaveSystemState(sysState)
@@ -212,23 +218,22 @@ func (a *App) handleSkipFwd() {
 			a.menuIndex--
 			a.publishMenu()
 		}
-	} else {
-		// Prevent skipping past the last chapter
-		if b, err := a.lib.GetByFilename(a.player.State.FilePath); err == nil {
-			currentChapterIdx := -1
-			for i, chap := range b.Chapters {
-				if a.player.State.Position >= chap.StartTime-0.5 {
-					currentChapterIdx = i
-				} else {
-					break
-				}
-			}
-			if currentChapterIdx >= len(b.Chapters)-1 {
-				return // We are on the last chapter, do not skip forward
-			}
-		}
-		_ = a.player.SkipChapter(1)
+		return
 	}
+	if a.atLastChapter() {
+		return // Don't skip forward past the final chapter
+	}
+	_ = a.player.SkipChapter(1)
+}
+
+// atLastChapter reports whether playback is within the final chapter of the
+// current book, used to suppress skip-forward past the end.
+func (a *App) atLastChapter() bool {
+	b, err := a.lib.GetByFilename(a.player.State.FilePath)
+	if err != nil {
+		return false
+	}
+	return library.ChapterIndexAt(b.Chapters, a.player.State.Position) >= len(b.Chapters)-1
 }
 
 func (a *App) handleSkipBack() {
