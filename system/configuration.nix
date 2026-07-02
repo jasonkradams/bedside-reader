@@ -86,13 +86,18 @@
 
   # We read the user's wireless.env file from the FAT32 boot partition
   # to dynamically configure Wi-Fi without hardcoding credentials in Nix.
-  systemd.services."wpa_supplicant-wlan0".preStart = lib.mkAfter ''
-    if [ -f /boot/firmware/wireless.env ]; then
-      # shellcheck source=/dev/null
-      source /boot/firmware/wireless.env
-      printf "ctrl_interface=/run/wpa_supplicant\nnetwork={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /etc/wpa_supplicant/imperative.conf
-    fi
-  '';
+  systemd.services."wpa_supplicant-wlan0" = {
+    # Ensure the FAT32 partition is mounted before we try to read the credentials
+    after = [ "boot-firmware.mount" ];
+    requires = [ "boot-firmware.mount" ];
+    preStart = lib.mkAfter ''
+      if [ -f /boot/firmware/wireless.env ]; then
+        # shellcheck source=/dev/null
+        source /boot/firmware/wireless.env
+        printf "ctrl_interface=/run/wpa_supplicant\nnetwork={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /etc/wpa_supplicant/imperative.conf
+      fi
+    '';
+  };
 
   # ---------------------------------------------------------
   # Systemd Services
