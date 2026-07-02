@@ -146,7 +146,9 @@ let
       echo "Starting macOS linux-builder VM (requires sudo for the network interface)..."
       # We explicitly use the stable nixos-26.05 channel for the builder because 
       # nixpkgs-unstable ships QEMU 11.0.0 which has a known fatal HVF bug on Apple Silicon.
-      unset QEMU_OPTS
+      # We also must set QEMU_OPTS="-cpu host" because QEMU's default -cpu max on M3/M4 
+      # causes silent memory corruption during tarball decompression (causing flake.nix missing errors).
+      export QEMU_OPTS="-cpu host"
       nix run github:NixOS/nixpkgs/nixos-26.05#darwin.linux-builder
     '';
   };
@@ -157,18 +159,19 @@ let
     text = ''
       echo "Building NixOS SD Card Image for AArch64 (requires linux-builder to be running)..."
       
-      # We cannot pass --builders directly because standard users are not trusted by the local Nix daemon.
-      # Instead, we bypass the daemon and evaluate locally while building directly on the remote store!
-      export NIX_SSHOPTS="-o StrictHostKeyChecking=no -i ''${PWD}/keys/builder_ed25519 -p 31022"
+      # The local macOS Nix daemon crashes when evaluating complex flakes over ssh-ng://
+      # So we bypass the local daemon completely by rsyncing the source to the builder and building natively!
+      export SSH_OPTS="-o StrictHostKeyChecking=no -i ''${PWD}/keys/builder_ed25519 -p 31022"
       
-      echo "Delegating build to linux-builder..."
-      out_path=$(nix --store ssh-ng://builder@localhost build .#nixosConfigurations.bedside-pi.config.system.build.sdImage --print-out-paths)
+      echo "Copying source to linux-builder..."
+      rsync -a --exclude=.git --exclude=result --exclude=nixos.qcow2 -e "ssh $SSH_OPTS" . builder@localhost:~/src/
+      
+      echo "Building on linux-builder (this will take a while)..."
+      ssh $SSH_OPTS builder@localhost "cd ~/src && nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage"
       
       echo "Copying built image back to macOS..."
-      nix copy --from ssh-ng://builder@localhost "$out_path"
-      
-      # Link it locally so the user can easily find it
-      ln -sfn "$out_path" result
+      mkdir -p result
+      rsync -a -e "ssh $SSH_OPTS" builder@localhost:~/src/result/ result/
       
       echo "Done! Image is located at: ./result/sd-image/"
     '';
