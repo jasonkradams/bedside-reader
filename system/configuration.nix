@@ -66,7 +66,6 @@
   # Install required packages
   environment.systemPackages = [
     bedside-app
-    pkgs.cog
     pkgs.mpv
   ];
 
@@ -95,15 +94,15 @@
       # shellcheck source=/dev/null
       source /boot/firmware/wireless.env
       # Generate the wpa_supplicant configuration block
-      printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /tmp/wireless.conf
+      printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /run/wireless.conf
     else
       # If no file exists, create an empty one so the include doesn't crash
-      touch /tmp/wireless.conf
+      touch /run/wireless.conf
     fi
   '';
 
-  # Tell wpa_supplicant to include our dynamically generated config
-  networking.wireless.extraConfig = "include /tmp/wireless.conf";
+  # Tell wpa_supplicant to load our dynamically generated config
+  networking.wireless.extraConfigFiles = [ "/run/wireless.conf" ];
 
   # ---------------------------------------------------------
   # Systemd Services
@@ -143,45 +142,6 @@
       ProtectHome = true;
       NoNewPrivileges = true;
       WatchdogSec = 30;
-    };
-  };
-
-  # Cog Kiosk Frontend Service
-  systemd.services.cog = {
-    description = "Bedside Kiosk (Cog on KMS/DRM)";
-    after = [
-      "bedside.service"
-      "systemd-user-sessions.service"
-    ];
-    requires = [ "bedside.service" ];
-    wantedBy = [ "multi-user.target" ];
-
-    # Only start if the DRM card exists (Wait for VC4 driver)
-    unitConfig.ConditionPathExists = "/dev/dri/card0";
-
-    environment = {
-      WEBKIT_DISABLE_COMPOSITING_MODE = "0";
-      XDG_RUNTIME_DIR = "/run/user/%U";
-    };
-
-    serviceConfig = {
-      Type = "simple";
-      User = "bedside";
-      Group = "bedside";
-
-      # Wait for the backend API to be healthy before starting Cog
-      ExecStartPre = "${pkgs.bash}/bin/sh -c 'until ${pkgs.curl}/bin/curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'";
-
-      ExecStart = ''
-        ${pkgs.cog}/bin/cog \
-          --platform=drm \
-          --geometry=320x240 \
-          --bg-color=000000 \
-          http://localhost:8080
-      '';
-
-      Restart = "always";
-      RestartSec = 2;
     };
   };
 
