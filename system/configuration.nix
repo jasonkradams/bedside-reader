@@ -90,20 +90,33 @@
 
   # We read the user's wireless.env file from the FAT32 boot partition
   # to dynamically configure Wi-Fi without hardcoding credentials in Nix.
-  systemd.services."wpa_supplicant-wlan0" = {
-    # Bypass systemd mount dependencies to avoid boot hangs.
-    # The FAT32 partition is /dev/mmcblk0p1 on the Pi. We just mount it briefly to read credentials.
-    preStart = lib.mkAfter ''
-      mkdir -p /run/firmware_tmp
-      mount /dev/mmcblk0p1 /run/firmware_tmp || true
-      if [ -f /run/firmware_tmp/wireless.env ]; then
+  systemd.services.extract-wifi-credentials = {
+    description = "Extract Wi-Fi credentials from FAT32 boot partition";
+    before = [ "wpa_supplicant-wlan0.service" ];
+    requiredBy = [ "wpa_supplicant-wlan0.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      # Always ensure the file exists so wpa_supplicant doesn't crash on boot
+      touch /var/lib/wifi.conf
+
+      mkdir -p /tmp/firmware_tmp
+      mount /dev/mmcblk0p1 /tmp/firmware_tmp || true
+      if [ -f /tmp/firmware_tmp/wireless.env ]; then
         # shellcheck source=/dev/null
-        source /run/firmware_tmp/wireless.env
-        printf "ctrl_interface=/run/wpa_supplicant\nnetwork={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /etc/wpa_supplicant/imperative.conf
+        source /tmp/firmware_tmp/wireless.env
+        if [ -n "''${WIFI_SSID:-}" ]; then
+          printf "ctrl_interface=/run/wpa_supplicant\nnetwork={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID}" "''${WIFI_PASSWORD:-}" > /var/lib/wifi.conf
+        fi
       fi
-      umount /run/firmware_tmp || true
+      umount /tmp/firmware_tmp || true
     '';
   };
+
+  # Override wpa_supplicant to use our explicitly extracted config file
+  systemd.services."wpa_supplicant-wlan0".serviceConfig.ExecStart = lib.mkForce "${pkgs.wpa_supplicant}/sbin/wpa_supplicant -c /var/lib/wifi.conf -i wlan0";
 
   # Flush logs to the SD card every 1 second (default is 5 minutes).
   # This prevents logs from being lost if the device hangs and is unplugged prematurely.
