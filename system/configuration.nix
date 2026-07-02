@@ -18,11 +18,11 @@
   # The easiest way to apply the custom Pi boot config is to inject
   # the exact config.txt and firmware files into the FAT32 firmware partition.
   sdImage.populateFirmwareCommands = lib.mkAfter ''
-    # The nixos-hardware module runs first and copies its own read-only config.txt.
-    # We remove it and replace it with our custom one.
-    rm -f firmware/config.txt firmware/cmdline.txt firmware/panel.bin firmware/user-data
-    cp ${./boot/config.txt} firmware/config.txt
-    cp ${./boot/cmdline.txt} firmware/cmdline.txt
+    # The nixos-hardware module runs first and creates firmware/config.txt
+    # We append our custom configuration to it.
+    chmod +w firmware/config.txt
+    cat ${./boot/config.txt} >> firmware/config.txt
+
     cp ${./boot/panel.bin} firmware/panel.bin
     cp ${./boot/user-data} firmware/user-data
   '';
