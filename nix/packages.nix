@@ -127,9 +127,8 @@ let
       # We use Docker to evaluate and build the NixOS image natively on the Linux VM.
       # This entirely bypasses the flaky macOS Nix daemon and QEMU HVF bugs.
       
-      echo "Cleaning up previous build cache to prevent out-of-space errors..."
-      docker volume rm nixos-builder-store >/dev/null 2>&1 || true
-      docker volume create nixos-builder-store >/dev/null
+      # Create a persistent volume for the Nix store so subsequent builds are fast
+      docker volume create nixos-builder-store >/dev/null || true
       
       echo "Starting builder container (this may take a while to download/compile)..."
       docker run --rm \
@@ -139,6 +138,10 @@ let
         nixos/nix:latest \
         bash -c "
           set -e
+          echo 'Running garbage collection to free up space from old builds...'
+          nix-collect-garbage || true
+          
+          echo 'Building image...'
           nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage
           echo 'Copying image out of container...'
           mkdir -p result-img
