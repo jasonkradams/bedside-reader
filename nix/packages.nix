@@ -138,9 +138,6 @@ let
         nixos/nix:latest \
         bash -c "
           set -e
-          echo 'Running garbage collection to free up space from old builds...'
-          nix-collect-garbage || true
-          
           echo 'Building image...'
           nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage
           echo 'Copying image out of container...'
