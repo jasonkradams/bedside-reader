@@ -97,17 +97,4 @@ func TestPlayer_Success_TimePosUpdatesWhenPaused(t *testing.T) {
 	// this is just a placeholder test to satisfy the TDD requirement for the regression
 }
 
-func TestPlayer_Success_TogglePauseWhenIdle(t *testing.T) {
-	b := bus.New()
-	mp := &mockPin{level: gpio.Low}
-	p := &Player{
-		bus:         b,
-		mutePin:     mp,
-		isIdle:      true,
-		currentPath: "some/test.m4b",
-		lib:         nil, // Wait, lib is nil! LoadFile uses lib.GetSystemState()!
-	}
 
-	// We need a dummy library or we can just mock sendCommand.
-	// Actually, if lib is nil, LoadFile will panic!
-}

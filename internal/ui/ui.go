@@ -162,8 +162,8 @@ func (r *Renderer) renderMenu() {
 		if title == "" {
 			title = filepath.Base(b.FilePath)
 		}
-		if len(title) > 28 {
-			title = title[:25] + "..."
+		if len(title) > 42 {
+			title = title[:39] + "..."
 		}
 
 		c := color.RGBA{200, 200, 200, 255}
@@ -185,7 +185,7 @@ func (r *Renderer) renderPlayer() {
 	var book *library.Audiobook
 	var chapterTitle string
 	var chapterStart float64
-	var chapterEnd float64 = r.playState.Duration
+	chapterEnd := r.playState.Duration
 
 	if r.playState.FilePath != "" {
 		b, err := r.lib.GetByFilename(r.playState.FilePath)
@@ -216,8 +216,8 @@ func (r *Renderer) renderPlayer() {
 	}
 
 	// Truncate long titles loosely
-	if len(title) > 35 {
-		title = title[:32] + "..."
+	if len(title) > 44 {
+		title = title[:41] + "..."
 	}
 	addLabel(r.canvas, 10, 30, title, color.RGBA{255, 255, 255, 255})
 

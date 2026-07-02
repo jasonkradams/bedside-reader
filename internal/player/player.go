@@ -243,20 +243,31 @@ func (p *Player) observeProperty(name string) {
 
 // LoadFile tells mpv to load a new file
 func (p *Player) LoadFile(path string) error {
-	// 1. Save progress of CURRENT file before switching
-	if p.State.FilePath != "" && p.State.Position > 0 {
-		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
-		_, _, timeout, _ := p.lib.GetSystemState()
-		p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
-	}
+	p.saveCurrentState()
+	p.loadNewState(path)
+	p.muteForTransition()
 
-	// 3. Update state for new file
+	p.State.Paused = false
+	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
+	_ = p.sendCommand("set_property", "pause", false)
+	return p.sendCommand("loadfile", path, "replace")
+}
+
+func (p *Player) saveCurrentState() {
+	if p.State.FilePath != "" && p.State.Position > 0 {
+		_ = p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+		_, _, timeout, _ := p.lib.GetSystemState()
+		_ = p.lib.SaveSystemState(p.currentPath, !p.State.Paused, timeout)
+	}
+}
+
+func (p *Player) loadNewState(path string) {
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)
+	
 	_, _, timeout, _ := p.lib.GetSystemState()
-	p.lib.SaveSystemState(path, true, timeout)
+	_ = p.lib.SaveSystemState(path, true, timeout)
 
-	// 4. Load saved progress for the NEW file
 	if pos, err := p.lib.GetProgress(p.State.FilePath); err == nil && pos > 0 {
 		p.State.Position = pos
 		p.pendingSeek = pos
@@ -264,20 +275,16 @@ func (p *Player) LoadFile(path string) error {
 		p.State.Position = 0
 		p.pendingSeek = 0
 	}
+}
 
-	// 5. Mute output instantly to hide transition buzzing, will unmute on file-loaded
-	p.sendCommand("set_property", "mute", true)
+func (p *Player) muteForTransition() {
+	_ = p.sendCommand("set_property", "mute", true)
 	if p.mutePin != nil {
-		p.mutePin.Out(gpio.Low) // Keep mute until Play/Resume
+		_ = p.mutePin.Out(gpio.Low) // Keep mute until Play/Resume
 		if p.muteTimer != nil {
 			p.muteTimer.Stop()
 		}
-	} // Hardware Mute
-
-	p.State.Paused = false
-	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
-	p.sendCommand("set_property", "pause", false)
-	return p.sendCommand("loadfile", path, "replace")
+	}
 }
 
 // TogglePause toggles playback state using Deep Sleep (stops mpv to close ALSA device)
@@ -293,33 +300,40 @@ func (p *Player) TogglePause() error {
 	}
 
 	if p.State.Paused {
-		// Resume playing
-		p.State.Paused = false
-		_, _, timeout, _ := p.lib.GetSystemState()
-		p.lib.SaveSystemState(p.currentPath, true, timeout)
-		p.sendCommandNoLock("set_property", "pause", false)
-		p.triggerMute()
+		p.resume()
 	} else {
-		// Pause native stream (keeps ALSA open, stopping I2S clock pops!)
-		p.State.Paused = true
-		_, _, timeout, _ := p.lib.GetSystemState()
-		p.lib.SaveSystemState(p.currentPath, false, timeout)
-		p.sendCommandNoLock("set_property", "pause", true)
-
-		if p.mutePin != nil {
-			p.mutePin.Out(gpio.Low) // Hardware Mute (Kills DAC hiss!)
-			if p.muteTimer != nil {
-				p.muteTimer.Stop()
-			}
-		}
-
-		// Immediately save progress to disk
-		p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+		p.pause()
 	}
 
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 	return nil
 }
+
+func (p *Player) resume() {
+	p.State.Paused = false
+	_, _, timeout, _ := p.lib.GetSystemState()
+	_ = p.lib.SaveSystemState(p.currentPath, true, timeout)
+	_ = p.sendCommandNoLock("set_property", "pause", false)
+	p.triggerMute()
+}
+
+func (p *Player) pause() {
+	p.State.Paused = true
+	_, _, timeout, _ := p.lib.GetSystemState()
+	_ = p.lib.SaveSystemState(p.currentPath, false, timeout)
+	_ = p.sendCommandNoLock("set_property", "pause", true)
+
+	if p.mutePin != nil {
+		_ = p.mutePin.Out(gpio.Low) // Hardware Mute (Kills DAC hiss!)
+		if p.muteTimer != nil {
+			p.muteTimer.Stop()
+		}
+	}
+
+	// Immediately save progress to disk
+	_ = p.lib.SaveProgress(p.State.FilePath, p.State.Position)
+}
+
 
 // Seek moves the playback position by delta seconds
 func (p *Player) Seek(deltaSeconds float64) error {

@@ -93,25 +93,9 @@ func New(eventBus *bus.Bus, dbPath, audioDir, coverDir string) (*Manager, error)
 		coverDir: coverDir,
 	}
 
-	// Listen for progress ticks to save state
-	go m.listenProgress()
-
 	return m, nil
 }
 
-func (m *Manager) listenProgress() {
-	ch := m.bus.Subscribe()
-	for ev := range ch {
-		if ev.Type == bus.EventPlayerProgressTick {
-			// Save progress occasionally or on pause/stop?
-			// For a Pi Zero 2 with an SD card, we probably shouldn't fsync 1Hz ticks.
-			// The architecture doc says: "written every SSE tick (~1Hz)".
-			// We will write it but maybe batch it if IO is an issue.
-			// For now, write synchronously.
-			// TODO: Actually parse Payload and save.
-		}
-	}
-}
 
 // Close closes the underlying boltdb
 func (m *Manager) Close() {
@@ -164,7 +148,22 @@ func (m *Manager) processFile(path string) {
 
 	log.Printf("Scanning new file: %s", filepath.Base(path))
 
-	// Run ffprobe
+	book, err := m.probeFile(path, id)
+	if err != nil {
+		log.Printf("Failed to probe file %s: %v", path, err)
+		return
+	}
+
+	// Save to DB
+	_ = m.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketLibrary)
+		data, _ := json.Marshal(book)
+		return b.Put([]byte(id), data)
+	})
+}
+
+// probeFile runs ffprobe to extract metadata and chapters from an audiobook file.
+func (m *Manager) probeFile(path, id string) (*Audiobook, error) {
 	cmd := exec.Command("ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
@@ -177,8 +176,7 @@ func (m *Manager) processFile(path string) {
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		log.Printf("ffprobe failed on %s: %v", path, err)
-		return
+		return nil, fmt.Errorf("ffprobe failed: %w", err)
 	}
 
 	var result struct {
@@ -195,15 +193,13 @@ func (m *Manager) processFile(path string) {
 	}
 
 	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-		log.Printf("failed to parse ffprobe json: %v", err)
-		return
+		return nil, fmt.Errorf("failed to parse ffprobe json: %w", err)
 	}
 
-	// Parse duration safely
 	var duration float64
-	fmt.Sscanf(result.Format.Duration, "%f", &duration)
+	_, _ = fmt.Sscanf(result.Format.Duration, "%f", &duration)
 
-	book := Audiobook{
+	book := &Audiobook{
 		ID:       id,
 		FilePath: path,
 		Title:    result.Format.Tags["title"],
@@ -224,12 +220,7 @@ func (m *Manager) processFile(path string) {
 		})
 	}
 
-	// Save to DB
-	m.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketLibrary)
-		data, _ := json.Marshal(book)
-		return b.Put([]byte(id), data)
-	})
+	return book, nil
 }
 
 // GetAll returns all audiobooks in the library
