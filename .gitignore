@@ -1,5 +1,5 @@
 # Binaries
-bedside
+./bedside
 build/
 
 # Go
@@ -23,6 +23,10 @@ result-*
 *.3mf
 *.stl
 *.step
+
+# Python
+__pycache__/
+*.pyc
 
 # OS Files
 .DS_Store
