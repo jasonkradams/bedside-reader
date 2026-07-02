@@ -50,10 +50,35 @@
               self.packages.${system}.build-os
               self.packages.${system}.flash-os
               self.packages.${system}.go_1_26_4
+              pkgs.colmena
             ];
           };
         }
       );
+
+      colmena = {
+        meta = {
+          nixpkgs = import nixpkgs {
+            system = "aarch64-linux";
+          };
+          specialArgs = {
+            inherit self;
+            bedside-app = self.packages.aarch64-linux.bedside-app;
+          };
+        };
+
+        bedside-pi = { name, nodes, pkgs, ... }: {
+          deployment.targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
+          deployment.targetUser = "root";
+          # Use cross-compilation if the deployment is initiated from macOS
+          deployment.buildOnTarget = false;
+          
+          imports = [
+            nixos-hardware.nixosModules.raspberry-pi-3
+            ./system/configuration.nix
+          ];
+        };
+      };
 
       nixosConfigurations = {
         bedside-pi = nixpkgs.lib.nixosSystem {
