@@ -189,10 +189,38 @@ let
     text = ''
       DISK="''${1:-}"
       if [ -z "$DISK" ]; then
-        echo "Error: You must specify the target disk (e.g., /dev/disk12)"
-        echo "Usage: flash-os /dev/disk12"
-        echo "Run 'diskutil list' to find your SD card."
-        exit 1
+        echo "Scanning for physical disks..."
+        # Find all physical disks except disk0 (main OS drive)
+        mapfile -t DISKS < <(diskutil list | awk '/^\/dev\/disk[0-9]+ .*physical/ {print $1}' | grep -v '^/dev/disk0$')
+        
+        if [ ''${#DISKS[@]} -eq 0 ]; then
+          echo "Error: No removable or external physical disks found!"
+          echo "Please plug in your SD card."
+          exit 1
+        fi
+        
+        OPTIONS=()
+        for d in "''${DISKS[@]}"; do
+          SIZE=$(diskutil info "$d" | awk -F': +' '/Disk Size/ {print $2}' | cut -d'(' -f1 | xargs)
+          NAME=$(diskutil info "$d" | awk -F': +' '/Device \/ Media Name/ {print $2}' | xargs)
+          if [ -z "$NAME" ]; then
+            NAME=$(diskutil info "$d" | awk -F': +' '/Device Identifier/ {print $2}' | xargs)
+          fi
+          OPTIONS+=("$d - $NAME ($SIZE)")
+        done
+        
+        echo "Please select the target SD card to flash:"
+        select opt in "''${OPTIONS[@]}" "Cancel"; do
+          if [ "$opt" = "Cancel" ]; then
+            echo "Cancelled."
+            exit 0
+          elif [ -n "$opt" ]; then
+            DISK=$(echo "$opt" | awk '{print $1}')
+            break
+          else
+            echo "Invalid selection. Please enter a number."
+          fi
+        done
       fi
       
       IMG=$(ls result-img/nixos-image-*.img.zst 2>/dev/null | head -n 1 || true)
