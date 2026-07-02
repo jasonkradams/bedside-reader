@@ -156,7 +156,20 @@ let
     name = "build-os";
     text = ''
       echo "Building NixOS SD Card Image for AArch64 (requires linux-builder to be running)..."
-      nix build .#nixosConfigurations.bedside-pi.config.system.build.sdImage --system aarch64-linux
+      
+      # We cannot pass --builders directly because standard users are not trusted by the local Nix daemon.
+      # Instead, we bypass the daemon and evaluate locally while building directly on the remote store!
+      export NIX_SSHOPTS="-o StrictHostKeyChecking=no -i ''${PWD}/keys/builder_ed25519 -p 31022"
+      
+      echo "Delegating build to linux-builder..."
+      out_path=$(nix --store ssh-ng://builder@localhost build .#nixosConfigurations.bedside-pi.config.system.build.sdImage --print-out-paths)
+      
+      echo "Copying built image back to macOS..."
+      nix copy --from ssh-ng://builder@localhost "$out_path"
+      
+      # Link it locally so the user can easily find it
+      ln -sfn "$out_path" result
+      
       echo "Done! Image is located at: ./result/sd-image/"
     '';
   };
