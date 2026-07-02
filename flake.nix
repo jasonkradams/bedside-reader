@@ -127,9 +127,43 @@
               fi
             '';
           };
+          # Script to stage boot files to the SD card
+          stage-boot = pkgs.writeShellApplication {
+            name = "stage-boot";
+            text = ''
+              boot_dir="''${1:-/Volumes/bootfs}"
+              if [ ! -d "$boot_dir" ]; then
+                echo "Error: Directory '$boot_dir' does not exist." >&2
+                exit 1
+              fi
+              cp -v system/boot/config.txt "$boot_dir/config.txt"
+              cp -v system/boot/cmdline.txt "$boot_dir/cmdline.txt"
+              cp -v system/boot/user-data "$boot_dir/user-data"
+              cp -v system/boot/panel.bin "$boot_dir/panel.bin"
+            '';
+          };
+
+          # Script to build and deploy the Go app to the Pi over SSH
+          deploy = pkgs.writeShellApplication {
+            name = "deploy";
+            runtimeInputs = [ pkgs.go pkgs.openssh ];
+            text = ''
+              host="''${1:-10.136.117.83}"
+              user="''${2:-pi}"
+              echo "Building for linux/arm64..."
+              cd app
+              GOOS=linux GOARCH=arm64 go build -o ../build/bedside ./cmd/bedside
+              cd ..
+              echo "Deploying to ''${user}@''${host}..."
+              ssh -o StrictHostKeyChecking=no "''${user}@''${host}" "sudo systemctl stop bedside.service || true"
+              scp -o StrictHostKeyChecking=no build/bedside "''${user}@''${host}:/tmp/bedside"
+              ssh -o StrictHostKeyChecking=no "''${user}@''${host}" "sudo mv /tmp/bedside /usr/local/bin/bedside && sudo chmod +x /usr/local/bin/bedside && sudo systemctl start bedside.service"
+              echo "Deployment complete! Service bedside.service restarted."
+            '';
+          };
         in
         {
-          inherit ffmpeg audible-convert;
+          inherit ffmpeg audible-convert stage-boot deploy;
           default = audible-convert;
         }
       );
@@ -140,13 +174,26 @@
             type = "app";
             program = "${self.packages.${system}.audible-convert}/bin/audible-convert";
           };
+          stage-boot = {
+            type = "app";
+            program = "${self.packages.${system}.stage-boot}/bin/stage-boot";
+          };
+          deploy = {
+            type = "app";
+            program = "${self.packages.${system}.deploy}/bin/deploy";
+          };
         }
       );
 
       devShells = forAllSystems (
         system: pkgs: {
           default = pkgs.mkShell {
-            packages = [ self.packages.${system}.ffmpeg ];
+            packages = [
+              self.packages.${system}.ffmpeg
+              self.packages.${system}.stage-boot
+              self.packages.${system}.deploy
+              pkgs.go
+            ];
           };
         }
       );
