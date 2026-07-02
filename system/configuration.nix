@@ -121,6 +121,10 @@
 
     serviceConfig = {
       Type = "notify";
+      # Export GPIO 13 (backlight) as root before starting, and make it writable by nobody
+      ExecStartPre = [
+        "+${pkgs.bash}/bin/bash -c 'if [ ! -d /sys/class/gpio/gpio13 ]; then echo 13 > /sys/class/gpio/export; sleep 0.1; fi; echo out > /sys/class/gpio/gpio13/direction; chown nobody:video /sys/class/gpio/gpio13/value'"
+      ];
       ExecStart = "${bedside-app}/bin/bedside";
       Restart = "always";
       RestartSec = 2;

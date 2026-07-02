@@ -72,10 +72,8 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 		log.Printf("Warning: Failed to unblank framebuffer: %v", errno)
 	}
 
-	// Turn on the backlight
-	if err := os.WriteFile("/sys/class/backlight/backlight_gpio/brightness", []byte("1"), 0644); err != nil {
-		log.Printf("Warning: Failed to turn on backlight: %v", err)
-	}
+	// Initial backlight
+	display.SetBacklight(true)
 
 	r := &Renderer{
 		bus:    eventBus,
