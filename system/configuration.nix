@@ -19,6 +19,9 @@
   # partition on a live rootfs causes the Pi Zero 2 W (512MB RAM) to OOM/freeze.
   sdImage.expandOnBoot = false;
   
+  # Give the FAT32 boot partition a better name (max 11 chars)
+  sdImage.firmwarePartitionName = "BEDSIDEBOOT";
+  
   # The easiest way to apply the custom Pi boot config is to inject
   # the exact config.txt and firmware files into the FAT32 firmware partition.
   sdImage.populateFirmwareCommands = lib.mkAfter ''
