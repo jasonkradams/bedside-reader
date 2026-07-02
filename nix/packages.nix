@@ -93,21 +93,7 @@ let
     '';
   };
 
-  # Script to stage boot files to the SD card
-  stage-boot = pkgs.writeShellApplication {
-    name = "stage-boot";
-    text = ''
-      boot_dir="''${1:-/Volumes/bootfs}"
-      if [ ! -d "$boot_dir" ]; then
-        echo "Error: Directory '$boot_dir' does not exist." >&2
-        exit 1
-      fi
-      cp -v system/boot/config.txt "$boot_dir/config.txt"
-      cp -v system/boot/cmdline.txt "$boot_dir/cmdline.txt"
-      cp -v system/boot/user-data "$boot_dir/user-data"
-      cp -v system/boot/panel.bin "$boot_dir/panel.bin"
-    '';
-  };
+
 
   # Override Go to 1.26.4 since Nixpkgs stable/unstable hasn't updated yet.
   # We fetch the exact source tarball from go.dev and override the package.
@@ -122,27 +108,7 @@ let
   # Re-bind buildGoModule to use our custom Go version
   buildGoModule_1_26_4 = pkgs.buildGoModule.override { go = go_1_26_4; };
 
-  # Script to build and deploy the Go app to the Pi over SSH
-  deploy = pkgs.writeShellApplication {
-    name = "deploy";
-    runtimeInputs = [
-      go_1_26_4
-      pkgs.openssh
-    ];
-    text = ''
-      host="''${1:-10.136.117.83}"
-      user="''${2:-pi}"
-      echo "Building for linux/arm64..."
-      cd app
-      GOOS=linux GOARCH=arm64 go build -o ../build/bedside ./cmd/bedside
-      cd ..
-      echo "Deploying to ''${user}@''${host}..."
-      ssh -o StrictHostKeyChecking=no "''${user}@''${host}" "sudo systemctl stop bedside.service || true"
-      scp -o StrictHostKeyChecking=no build/bedside "''${user}@''${host}:/tmp/bedside"
-      ssh -o StrictHostKeyChecking=no "''${user}@''${host}" "sudo mv /tmp/bedside /usr/local/bin/bedside && sudo chmod +x /usr/local/bin/bedside && sudo systemctl start bedside.service"
-      echo "Deployment complete! Service bedside.service restarted."
-    '';
-  };
+
 
   # Bedside App Go Binary
   bedside-app = buildGoModule_1_26_4 {
@@ -258,8 +224,6 @@ in
   inherit
     ffmpeg
     audible-convert
-    stage-boot
-    deploy
     bedside-app
     build-os
     flash-os
