@@ -72,9 +72,10 @@
   systemd.services.wpa_supplicant.preStart = lib.mkBefore ''
     if [ -f /boot/firmware/wireless.env ]; then
       # Source the environment variables safely
+      # shellcheck source=/dev/null
       source /boot/firmware/wireless.env
       # Generate the wpa_supplicant configuration block
-      printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "$WIFI_SSID" "$WIFI_PASSWORD" > /tmp/wireless.conf
+      printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID:-}" "''${WIFI_PASSWORD:-}" > /tmp/wireless.conf
     else
       # If no file exists, create an empty one so the include doesn't crash
       touch /tmp/wireless.conf
