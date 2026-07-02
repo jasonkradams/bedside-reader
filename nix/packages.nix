@@ -230,8 +230,17 @@ let
         exit 1
       fi
 
-      echo "Unmounting $DISK..."
-      diskutil unmountDisk "$DISK" || true
+      if df | grep -q "$DISK"; then
+        echo "Warning: $DISK (or its partitions) is currently mounted."
+        read -p "It must be unmounted to continue. Unmount now? [y/N] " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+          echo "Aborted."
+          exit 1
+        fi
+      fi
+
+      echo "Ensuring $DISK is unmounted..."
+      diskutil unmountDisk "$DISK" >/dev/null 2>&1 || true
 
       RDISK="''${DISK/disk/rdisk}"
       echo "Flashing $IMG to $RDISK..."
