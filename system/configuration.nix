@@ -41,8 +41,9 @@
   # Packages & Services
   # ---------------------------------------------------------
 
-  # Ensure the bedside user and group exist
+  # Ensure the bedside user and required groups exist
   users.groups.bedside = { };
+  users.groups.gpio = { };
   users.users.bedside = {
     isNormalUser = true;
     group = "bedside";
@@ -114,7 +115,6 @@
       RestartSec = 2;
       User = "bedside";
       Group = "bedside";
-      SupplementaryGroups = "audio gpio video";
       StateDirectory = "bedside";
       ReadWritePaths = "/var/lib/bedside";
       ProtectSystem = "strict";
@@ -146,7 +146,6 @@
       Type = "simple";
       User = "bedside";
       Group = "bedside";
-      SupplementaryGroups = "video render input";
 
       # Wait for the backend API to be healthy before starting Cog
       ExecStartPre = "${pkgs.bash}/bin/sh -c 'until ${pkgs.curl}/bin/curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'";
