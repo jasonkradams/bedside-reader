@@ -25,6 +25,7 @@
 
     cp ${./boot/panel.bin} firmware/panel.bin
     cp ${./boot/user-data} firmware/user-data
+    cp ${../boot/wireless.env.example} firmware/wireless.env.example
   '';
 
   # The panel.bin firmware must also be available in the root filesystem
@@ -59,6 +60,33 @@
     bedside-app
     pkgs.cog
   ];
+
+  # ---------------------------------------------------------
+  # Networking & Wi-Fi
+  # ---------------------------------------------------------
+
+  networking.wireless.enable = true;
+
+  # We read the user's wireless.env file from the FAT32 boot partition
+  # to dynamically configure Wi-Fi without hardcoding credentials in Nix.
+  systemd.services.wpa_supplicant.preStart = lib.mkBefore ''
+    if [ -f /boot/firmware/wireless.env ]; then
+      # Source the environment variables safely
+      source /boot/firmware/wireless.env
+      # Generate the wpa_supplicant configuration block
+      printf "network={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "$WIFI_SSID" "$WIFI_PASSWORD" > /tmp/wireless.conf
+    else
+      # If no file exists, create an empty one so the include doesn't crash
+      touch /tmp/wireless.conf
+    fi
+  '';
+
+  # Tell wpa_supplicant to include our dynamically generated config
+  networking.wireless.extraConfig = "include /tmp/wireless.conf";
+
+  # ---------------------------------------------------------
+  # Systemd Services
+  # ---------------------------------------------------------
 
   # Udev rules
   services.udev.extraRules = ''
