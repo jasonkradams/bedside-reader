@@ -161,6 +161,14 @@ func (p *Player) listen() {
 					if val, ok := data.(float64); ok {
 						p.State.Position = val
 						p.bus.Publish(bus.EventPlayerProgressTick, p.State)
+						
+						// Mute the hardware slightly before the file naturally ends to mask the ALSA pop
+						if p.State.Duration > 0 && p.State.Position >= p.State.Duration-0.2 {
+							if p.mutePin != nil {
+								_ = p.mutePin.Out(gpio.Low)
+							}
+						}
+
 						if time.Since(p.lastSave) > 10*time.Second {
 							p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 							_, _, timeout, _ := p.lib.GetSystemState()

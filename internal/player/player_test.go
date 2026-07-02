@@ -120,4 +120,36 @@ func TestPlayer_Success_EndFileErrorUpdatesIdleState(t *testing.T) {
 	server.Close()
 }
 
+func TestPlayer_Success_MutesBeforeEOF(t *testing.T) {
+	b := bus.New()
+	mp := &mockPin{level: gpio.High}
+	p := &Player{
+		bus:      b,
+		mutePin:  mp,
+		isIdle:   false,
+		State:    PlaybackState{Duration: 100, Position: 90},
+		lastSave: time.Now(),
+	}
+
+	// We don't need listen(), we can just call handleTimePos(val) if we extract it,
+	// or we can just simulate the JSON payload over net.Pipe.
+	client, server := net.Pipe()
+	p.conn = client
+	go p.listen()
+
+	// Send time-pos update close to duration
+	_, _ = server.Write([]byte(`{"event": "property-change", "name": "time-pos", "data": 99.9}` + "\n"))
+
+	time.Sleep(50 * time.Millisecond)
+
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
+	
+	if mp.level != gpio.Low {
+		t.Errorf("fail: expected mute pin to be Low when near EOF to prevent pop, got %v", mp.level)
+	}
+
+	server.Close()
+}
+
 
