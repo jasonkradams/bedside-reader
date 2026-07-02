@@ -143,13 +143,12 @@ let
   start-builder = pkgs.writeShellApplication {
     name = "start-builder";
     text = ''
-      echo "Starting macOS linux-builder VM (requires sudo for the network interface)..."
-      # We explicitly use the stable nixos-26.05 channel for the builder because 
-      # nixpkgs-unstable ships QEMU 11.0.0 which has a known fatal HVF bug on Apple Silicon.
-      # We also must set QEMU_OPTS="-cpu host" because QEMU's default -cpu max on M3/M4 
-      # causes silent memory corruption during tarball decompression (causing flake.nix missing errors).
-      export QEMU_OPTS="-cpu host"
-      nix run github:NixOS/nixpkgs/nixos-26.05#darwin.linux-builder
+      # We explicitly use the older nixos-24.05 channel for the builder because 
+      # it ships QEMU 8.2.7. QEMU 9.0+ has a known fatal HVF memory corruption bug 
+      # on Apple Silicon M3/M4 that causes random SQLite and gzip decompression failures
+      # when using -cpu max.
+      unset QEMU_OPTS
+      nix run github:NixOS/nixpkgs/nixos-24.05#darwin.linux-builder
     '';
   };
 
