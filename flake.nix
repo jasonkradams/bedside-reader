@@ -60,7 +60,7 @@
               self.packages.${system}.stage-boot
               self.packages.${system}.deploy
               self.packages.${system}.build-os
-              pkgs.go
+              self.packages.${system}.go_1_26_4
             ];
           };
         }

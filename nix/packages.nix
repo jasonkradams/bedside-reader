@@ -109,11 +109,24 @@ let
     '';
   };
 
+  # Override Go to 1.26.4 since Nixpkgs stable/unstable hasn't updated yet.
+  # We fetch the exact source tarball from go.dev and override the package.
+  go_1_26_4 = pkgs.go.overrideAttrs (old: {
+    version = "1.26.4";
+    src = pkgs.fetchurl {
+      url = "https://go.dev/dl/go1.26.4.src.tar.gz";
+      hash = "sha256-T2aKMvv8ETLmqIH7lowvHa2mMUkqM5IRc1+7JVpCYC0=";
+    };
+  });
+
+  # Re-bind buildGoModule to use our custom Go version
+  buildGoModule_1_26_4 = pkgs.buildGoModule.override { go = go_1_26_4; };
+
   # Script to build and deploy the Go app to the Pi over SSH
   deploy = pkgs.writeShellApplication {
     name = "deploy";
     runtimeInputs = [
-      pkgs.go
+      go_1_26_4
       pkgs.openssh
     ];
     text = ''
@@ -132,7 +145,7 @@ let
   };
 
   # Bedside App Go Binary
-  bedside-app = pkgs.buildGoModule {
+  bedside-app = buildGoModule_1_26_4 {
     pname = "bedside-app";
     version = "1.0.0";
     src = ../app; # Adjust path relative to this file
@@ -178,6 +191,7 @@ in
     deploy
     bedside-app
     build-os
+    go_1_26_4
     ;
   default = audible-convert;
 }

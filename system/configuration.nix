@@ -1,4 +1,10 @@
-{ config, pkgs, lib, bedside-app, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  bedside-app,
+  ...
+}:
 
 {
   # Set the release version
@@ -22,7 +28,7 @@
   # The panel.bin firmware must also be available in the root filesystem
   # so the Linux kernel can load it when the ST7789V driver requests it.
   hardware.firmware = [
-    (pkgs.runCommand "display-firmware" {} ''
+    (pkgs.runCommand "display-firmware" { } ''
       mkdir -p $out/lib/firmware
       cp ${./boot/panel.bin} $out/lib/firmware/panel.bin
     '')
@@ -33,11 +39,17 @@
   # ---------------------------------------------------------
 
   # Ensure the bedside user and group exist
-  users.groups.bedside = {};
+  users.groups.bedside = { };
   users.users.bedside = {
     isNormalUser = true;
     group = "bedside";
-    extraGroups = [ "audio" "gpio" "video" "render" "input" ];
+    extraGroups = [
+      "audio"
+      "gpio"
+      "video"
+      "render"
+      "input"
+    ];
   };
 
   # Install required packages
@@ -57,10 +69,13 @@
   # Bedside Go Backend Service
   systemd.services.bedside = {
     description = "Bedside Audiobook Player";
-    after = [ "network-online.target" "sound.target" ];
+    after = [
+      "network-online.target"
+      "sound.target"
+    ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
-    
+
     serviceConfig = {
       Type = "notify";
       ExecStart = "${bedside-app}/bin/bedside";
@@ -81,10 +96,13 @@
   # Cog Kiosk Frontend Service
   systemd.services.cog = {
     description = "Bedside Kiosk (Cog on KMS/DRM)";
-    after = [ "bedside.service" "systemd-user-sessions.service" ];
+    after = [
+      "bedside.service"
+      "systemd-user-sessions.service"
+    ];
     requires = [ "bedside.service" ];
     wantedBy = [ "multi-user.target" ];
-    
+
     # Only start if the DRM card exists (Wait for VC4 driver)
     unitConfig.ConditionPathExists = "/dev/dri/card0";
 
@@ -98,10 +116,10 @@
       User = "bedside";
       Group = "bedside";
       SupplementaryGroups = "video render input";
-      
+
       # Wait for the backend API to be healthy before starting Cog
       ExecStartPre = "${pkgs.bash}/bin/sh -c 'until ${pkgs.curl}/bin/curl -fsS http://localhost:8080/healthz; do sleep 0.3; done'";
-      
+
       ExecStart = ''
         ${pkgs.cog}/bin/cog \
           --platform=drm \
@@ -109,7 +127,7 @@
           --bg-color=000000 \
           http://localhost:8080
       '';
-      
+
       Restart = "always";
       RestartSec = 2;
     };
@@ -118,6 +136,6 @@
   # Allow ssh access for deployment
   services.openssh.enable = true;
   users.users.root.openssh.authorizedKeys.keys = [
-    # Add your SSH key here for root access / deployment
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFi9PGouQ/5XIMO6NSUzOqVPkPBFR9DmWDOjF1CZ96Io"
   ];
 }
