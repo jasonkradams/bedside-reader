@@ -164,13 +164,16 @@ let
       export SSH_OPTS="-o StrictHostKeyChecking=no -i ''${PWD}/keys/builder_ed25519 -p 31022"
       
       echo "Copying source to linux-builder..."
+      # shellcheck disable=SC2086
       rsync -a --exclude=.git --exclude=result --exclude=nixos.qcow2 -e "ssh $SSH_OPTS" . builder@localhost:~/src/
       
       echo "Building on linux-builder (this will take a while)..."
+      # shellcheck disable=SC2086
       ssh $SSH_OPTS builder@localhost "cd ~/src && nix build --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage"
       
       echo "Copying built image back to macOS..."
       mkdir -p result
+      # shellcheck disable=SC2086
       rsync -a -e "ssh $SSH_OPTS" builder@localhost:~/src/result/ result/
       
       echo "Done! Image is located at: ./result/sd-image/"
