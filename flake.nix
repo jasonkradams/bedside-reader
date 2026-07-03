@@ -11,7 +11,7 @@
   };
 
   outputs =
-    { self, nixpkgs, nixos-hardware, nixos-generators }:
+    { self, nixpkgs, nixos-hardware, ... }:
     let
       systems = [
         "aarch64-darwin"
@@ -24,7 +24,7 @@
     in
     {
       packages = forAllSystems (
-        system: pkgs: pkgs.callPackage ./nix/packages.nix {}
+        _system: pkgs: pkgs.callPackage ./nix/packages.nix {}
       );
 
       apps = forAllSystems (
@@ -67,11 +67,13 @@
           };
         };
 
-        bedside-pi = { name, nodes, pkgs, ... }: {
-          deployment.targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
-          deployment.targetUser = "root";
-          # Use cross-compilation if the deployment is initiated from macOS
-          deployment.buildOnTarget = false;
+        bedside-pi = { ... }: {
+          deployment = {
+            targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
+            targetUser = "root";
+            # Use cross-compilation if the deployment is initiated from macOS
+            buildOnTarget = false;
+          };
           
           imports = [
             nixos-hardware.nixosModules.raspberry-pi-3

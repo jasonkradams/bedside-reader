@@ -97,7 +97,7 @@ let
 
   # Override Go to 1.26.4 since Nixpkgs stable/unstable hasn't updated yet.
   # We fetch the exact source tarball from go.dev and override the package.
-  go_1_26_4 = pkgs.go.overrideAttrs (old: {
+  go_1_26_4 = pkgs.go.overrideAttrs (_old: {
     version = "1.26.4";
     src = pkgs.fetchurl {
       url = "https://go.dev/dl/go1.26.4.src.tar.gz";
