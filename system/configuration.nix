@@ -93,7 +93,7 @@
   systemd.services.extract-wifi-credentials = {
     description = "Extract Wi-Fi credentials from FAT32 boot partition";
     before = [ "wpa_supplicant-wlan0.service" ];
-    requiredBy = [ "wpa_supplicant-wlan0.service" ];
+    wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -116,7 +116,10 @@
   };
 
   # Override wpa_supplicant to use our explicitly extracted config file
-  systemd.services."wpa_supplicant-wlan0".serviceConfig.ExecStart = lib.mkForce "${pkgs.wpa_supplicant}/sbin/wpa_supplicant -c /var/lib/wifi.conf -i wlan0";
+  systemd.services."wpa_supplicant-wlan0" = {
+    wants = [ "extract-wifi-credentials.service" ];
+    serviceConfig.ExecStart = lib.mkForce "${pkgs.wpa_supplicant}/sbin/wpa_supplicant -c /var/lib/wifi.conf -i wlan0";
+  };
 
   # Flush logs to the SD card every 1 second (default is 5 minutes).
   # This prevents logs from being lost if the device hangs and is unplugged prematurely.
