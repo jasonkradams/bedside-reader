@@ -189,6 +189,17 @@
 
     # Allow ssh access for deployment
     openssh.enable = true;
+
+    # Safety net for the ~399MB-usable board: kill the biggest memory hog before a
+    # runaway (e.g. an accidental on-device build) thrashes RAM + zram into an
+    # unresponsive state that needs a physical power-cycle. earlyoom is a tiny
+    # mlock'd daemon that stays responsive under pressure and keeps sshd alive.
+    earlyoom = {
+      enable = true;
+      freeMemThreshold = 10; # SIGTERM the worst process under ~10% free RAM
+      freeSwapThreshold = 20; # ...once zram swap is also mostly full
+      reportInterval = 0; # no periodic memory-report spam in the journal
+    };
   };
 
   # ---------------------------------------------------------
