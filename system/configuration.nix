@@ -17,11 +17,10 @@
     # in NixOS. Loading ZFS modules and daemons on a 512MB Pi Zero causes instant OOM freezes!
     supportedFilesystems = lib.mkForce [ "vfat" "ext4" ];
 
-    # DIAGNOSTIC (2026-07-02): the board has never mounted root — it hangs in the
-    # initrd before anything reaches disk (root fs shows Last-mount-time n/a, all
-    # logs empty). Fall back from systemd-initrd to the scripted initrd, which
-    # resolves the SD root more reliably on Raspberry Pi, to test that hypothesis.
-    # Revert once the real cause is known.
+    # CONFIRMED FIX: systemd-initrd could not mount the SD root on this Pi Zero 2 W,
+    # so the board never booted (root fs Last-mount-time n/a, all logs empty) until
+    # this was flipped. The scripted initrd mounts /dev/disk/by-label/NIXOS_SD
+    # reliably. Keep disabled.
     initrd.systemd.enable = lib.mkForce false;
   };
 
@@ -139,13 +138,18 @@
         description = "Extract Wi-Fi credentials from FAT32 boot partition";
         before = [ "wpa_supplicant-wlan0.service" ];
         wantedBy = [ "multi-user.target" ];
+        # mount/umount live in util-linux. A systemd unit's PATH does not include
+        # them by default, so without this the mount silently fails ("command not
+        # found") and wireless.env is never read — wifi can never come up.
+        path = [ pkgs.util-linux ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
         };
         script = ''
-          # Always ensure the file exists so wpa_supplicant doesn't crash on boot
-          touch /var/lib/wifi.conf
+          # Always leave a syntactically valid config behind so wpa_supplicant
+          # starts cleanly even before/without credentials on the card.
+          printf 'ctrl_interface=/run/wpa_supplicant\nupdate_config=1\n' > /var/lib/wifi.conf
 
           mkdir -p /tmp/firmware_tmp
           mount /dev/mmcblk0p1 /tmp/firmware_tmp || true
@@ -160,10 +164,18 @@
         '';
       };
 
-      # Override wpa_supplicant to use our explicitly extracted config file
+      # Override wpa_supplicant to use our explicitly extracted config file.
       "wpa_supplicant-wlan0" = {
+        # `after` (not just `wants`) so wpa waits for the config to be written;
+        # the log showed it starting before extract-wifi-credentials had run.
         wants = [ "extract-wifi-credentials.service" ];
-        serviceConfig.ExecStart = lib.mkForce "${pkgs.wpa_supplicant}/sbin/wpa_supplicant -c /var/lib/wifi.conf -i wlan0";
+        after = [ "extract-wifi-credentials.service" ];
+        serviceConfig = {
+          ExecStart = lib.mkForce "${pkgs.wpa_supplicant}/sbin/wpa_supplicant -c /var/lib/wifi.conf -i wlan0";
+          # A single failed start otherwise leaves wifi down for the whole boot.
+          Restart = lib.mkForce "on-failure";
+          RestartSec = 3;
+        };
       };
 
       # Bedside Go Backend Service
