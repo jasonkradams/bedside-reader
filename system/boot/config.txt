@@ -1,16 +1,12 @@
 # For more options and information see
 # http://rptl.io/configtxt
-# Some settings may impact device functionality. See link above for details
 
-# Enable required hardware interfaces for the screen & amp
+# Enable required hardware interfaces for the amp (and, later, the SPI screen)
 dtparam=spi=on
 dtparam=i2s=on
 
 # Disable onboard audio (using MAX98357A via I2S instead)
 dtparam=audio=off
-
-# Additional overlays and parameters are documented
-# /boot/firmware/overlays/README
 
 # Automatically load overlays for detected cameras and DSI displays
 camera_auto_detect=1
@@ -18,13 +14,6 @@ display_auto_detect=1
 
 # Automatically load initramfs files, if found
 auto_initramfs=1
-
-# Enable DRM VC4 V3D driver (Crucial for Cog/KMS rendering)
-dtoverlay=vc4-kms-v3d
-max_framebuffers=2
-
-# Don't have the firmware create an initial video= setting in cmdline.txt.
-disable_fw_kms_setup=1
 
 # Run in 64-bit mode
 arm_64bit=1
@@ -36,18 +25,25 @@ disable_overscan=1
 arm_boost=1
 
 # --- Appliance-Specific Overlays ---
+# These are applied by the Raspberry Pi firmware from overlays/ on this FAT
+# partition (U-Boot ignores the NixOS FDTDIR on this board, so hardware.deviceTree
+# never reaches the kernel — the firmware owns the device tree here).
+# IMPORTANT: enable overlays ONE AT A TIME. Applying all of them at once hung early
+# boot. Audio is validated first; display/backlight/KMS stay commented until each
+# is proven to boot on its own.
 
-# MAX98357A speaks the same I2S protocol as HiFiBerry's DAC
-dtoverlay=hifiberry-dac
+# MAX98357A I2S DAC/amp — snd-soc-max98357a + simple-audio-card (both in-kernel)
+dtoverlay=max98357a
 
-# Display HAT Mini — ST7789V via SPI
-dtoverlay=mipi-dbi-spi,spi0-1,speed=60000000
-dtparam=compatible=sitronix\,st7789v\0panel-mipi-dbi-spi
-dtparam=width=320,height=240,width-mm=43,height-mm=27
-dtparam=dc-gpio=9
-
-# Explicitly create a backlight sysfs node for GPIO 13
-dtoverlay=gpio-backlight,gpio=13,active_low=0
+# Display HAT Mini ST7789V (SPI) + KMS — DISABLED until validated after audio:
+#dtoverlay=vc4-kms-v3d
+#max_framebuffers=2
+#disable_fw_kms_setup=1
+#dtoverlay=mipi-dbi-spi,spi0-1,speed=60000000
+#dtparam=compatible=sitronix\,st7789v\0panel-mipi-dbi-spi
+#dtparam=width=320,height=240,width-mm=43,height-mm=27
+#dtparam=dc-gpio=9
+#dtoverlay=gpio-backlight,gpio=13,active_low=0
 
 # Hardware watchdog (Zero 2 W has BCM2837 watchdog)
 dtparam=watchdog=on

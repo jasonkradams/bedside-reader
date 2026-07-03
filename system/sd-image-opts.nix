@@ -19,6 +19,11 @@
       cat ${./boot/config.txt} >> firmware/config.txt
 
       cp ${./boot/panel.bin} firmware/panel.bin
+
+      # Ship the RPi device-tree overlays so the firmware can apply the dtoverlay
+      # lines in config.txt. U-Boot ignores the NixOS FDTDIR on this board, so the
+      # firmware owns the device tree — without these blobs, dtoverlay= is a no-op.
+      cp -r ${config.boot.kernelPackages.kernel}/dtbs/overlays firmware/overlays
     '';
   };
 }

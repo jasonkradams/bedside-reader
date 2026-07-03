@@ -58,67 +58,12 @@
     '')
   ];
 
-  # Apply device-tree overlays into the kernel DTB at build time. The config.txt
-  # dtoverlays never reach the kernel here: populateFirmwareCommands is image-build
-  # only (so colmena/nixos-rebuild deploys don't carry them), and U-Boot's FDTDIR
-  # loads NixOS's own DTB and discards anything the firmware assembled. Describing
-  # the appliance hardware here is what actually takes effect.
-  hardware.deviceTree = {
-    # Only the Zero 2 W board DTB needs our overlays; applying to every DTB in the
-    # set risks fdtoverlay failing on one that lacks a targeted symbol.
-    filter = "bcm2710-rpi-zero-2-w.dtb";
-    overlays = [
-      {
-        # MAX98357A I2S amplifier. The prebuilt max98357a/hifiberry-dac overlays only
-        # enable I2S under fdtoverlay — their card setup is parameter-gated and needs
-        # the RPi firmware's overlay applicator. So describe the card explicitly:
-        # simple-audio-card (snd-soc-simple-card) wiring the I2S controller to the
-        # maxim,max98357a codec (snd-soc-max98357a); both drivers ship in this kernel.
-        # No sdmode-gpios: the amp's SD_MODE is tied on in hardware.
-        name = "max98357a-simple";
-        dtsText = ''
-          /dts-v1/;
-          /plugin/;
-          / {
-            compatible = "brcm,bcm2837";
-
-            fragment@0 {
-              target = <&i2s_clk_producer>;
-              __overlay__ {
-                status = "okay";
-              };
-            };
-
-            fragment@1 {
-              target-path = "/";
-              __overlay__ {
-                max98357a_codec: max98357a {
-                  #sound-dai-cells = <0>;
-                  compatible = "maxim,max98357a";
-                  status = "okay";
-                };
-              };
-            };
-
-            fragment@2 {
-              target = <&sound>;
-              __overlay__ {
-                compatible = "simple-audio-card";
-                simple-audio-card,name = "MAX98357A";
-                status = "okay";
-                simple-audio-card,cpu {
-                  sound-dai = <&i2s_clk_producer>;
-                };
-                simple-audio-card,codec {
-                  sound-dai = <&max98357a_codec>;
-                };
-              };
-            };
-          };
-        '';
-      }
-    ];
-  };
+  # This board's U-Boot ignores the generic-extlinux FDTDIR and boots the dtb the
+  # Raspberry Pi firmware assembles from config.txt (+ the overlays/ dir on the FAT
+  # firmware partition). So hardware.deviceTree.overlays never reach the kernel —
+  # the device tree is owned by boot/config.txt here, not NixOS. Stop emitting an
+  # FDTDIR so the intent is explicit and no unused dtbs are installed.
+  boot.loader.generic-extlinux-compatible.useGenerationDeviceTree = false;
 
   # ---------------------------------------------------------
   # Packages & Services
