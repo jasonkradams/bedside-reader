@@ -39,14 +39,14 @@ func SetBacklight(on bool) {
 
 	if _, err := os.Stat(gpioPath); os.IsNotExist(err) {
 		// Export the GPIO
-		if err := os.WriteFile("/sys/class/gpio/export", []byte(gpioNum), 0200); err == nil {
-			// Set direction to out
-			os.WriteFile(gpioPath+"/direction", []byte("out"), 0644)
-		} else {
+		if err := os.WriteFile("/sys/class/gpio/export", []byte(gpioNum), 0200); err != nil {
 			log.Printf("Failed to export GPIO %s: %v", gpioNum, err)
 			return
 		}
 	}
+	
+	// Always ensure direction is out before writing value
+	os.WriteFile(gpioPath+"/direction", []byte("out"), 0644)
 	
 	if err := os.WriteFile(gpioPath+"/value", []byte(val), 0644); err != nil {
 		log.Printf("Failed to set GPIO %s backlight: %v", gpioNum, err)
