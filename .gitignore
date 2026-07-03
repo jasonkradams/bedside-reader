@@ -17,6 +17,7 @@ vendor/
 result
 result-*
 .direnv/
+.tmp-ssh/
 
 # Fusion 360 / CAD
 *.f3d

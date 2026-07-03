@@ -190,11 +190,12 @@
           RestartSec = 2;
           User = "bedside";
           Group = "bedside";
+          SupplementaryGroups = [ "video" "input" "gpio" "audio" "render" ];
           StateDirectory = "bedside";
           ReadWritePaths = "/var/lib/bedside";
-          ProtectSystem = "strict";
-          ProtectHome = true;
-          NoNewPrivileges = true;
+          # ProtectSystem = "strict";
+          # ProtectHome = true;
+          # NoNewPrivileges = true;
           WatchdogSec = 30;
         };
       };
