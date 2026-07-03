@@ -93,6 +93,7 @@
             "${nixpkgs}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
             nixos-hardware.nixosModules.raspberry-pi-3
             ./system/configuration.nix
+            ./system/sd-image-opts.nix
           ];
         };
       };
