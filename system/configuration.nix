@@ -80,9 +80,6 @@
           /dts-v1/;
           /plugin/;
           / {
-            # Must intersect the base dtb's compatible ("raspberrypi,model-zero-2-w",
-            # "brcm,bcm2837"), or NixOS's apply_overlays.py silently skips the overlay.
-            # (The Zero 2 W is BCM2837, not the BCM2835 the prebuilt RPi overlays assume.)
             compatible = "brcm,bcm2837";
 
             fragment@0 {

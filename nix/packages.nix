@@ -300,9 +300,11 @@ let
           echo '  IdentityFile /root/.ssh/id_ed25519' >> /root/.ssh/config
           chmod 600 /root/.ssh/config
           
-          echo 'Cleaning up orphaned cache...'
-          nix-collect-garbage >/dev/null 2>&1 || true
-          
+          # NOTE: intentionally no nix-collect-garbage here. It deleted the RPi
+          # kernel from the persistent volume on every run, forcing a ~20min kernel
+          # rebuild each deploy. The volume persists across deploys; if it ever grows
+          # too large, prune it explicitly with 'docker volume rm nixos-builder-store'.
+
           echo 'Running colmena apply...'
           nix run --extra-experimental-features 'nix-command flakes' nixpkgs#colmena apply
         "
