@@ -148,15 +148,16 @@
         script = ''
           # Always leave a syntactically valid config behind so wpa_supplicant
           # starts cleanly even before/without credentials on the card.
-          printf 'ctrl_interface=/run/wpa_supplicant\nupdate_config=1\n' > /var/lib/wifi.conf
+          mkdir -p /etc/wpa_supplicant
+          printf 'ctrl_interface=/run/wpa_supplicant\nupdate_config=1\n' > /etc/wpa_supplicant/wifi.conf
 
           mkdir -p /tmp/firmware_tmp
-          mount /dev/mmcblk0p1 /tmp/firmware_tmp || true
+          mount /dev/disk/by-label/BEDSIDEBOOT /tmp/firmware_tmp || true
           if [ -f /tmp/firmware_tmp/wireless.env ]; then
             # shellcheck source=/dev/null
             source /tmp/firmware_tmp/wireless.env
             if [ -n "''${WIFI_SSID:-}" ]; then
-              printf "ctrl_interface=/run/wpa_supplicant\nnetwork={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID}" "''${WIFI_PASSWORD:-}" > /var/lib/wifi.conf
+              printf "ctrl_interface=/run/wpa_supplicant\nnetwork={\n  ssid=\"%s\"\n  psk=\"%s\"\n}\n" "''${WIFI_SSID}" "''${WIFI_PASSWORD:-}" > /etc/wpa_supplicant/wifi.conf
             fi
           fi
           umount /tmp/firmware_tmp || true
@@ -170,7 +171,7 @@
         wants = [ "extract-wifi-credentials.service" ];
         after = [ "extract-wifi-credentials.service" ];
         serviceConfig = {
-          ExecStart = lib.mkForce "${pkgs.wpa_supplicant}/sbin/wpa_supplicant -c /var/lib/wifi.conf -i wlan0";
+          ExecStart = lib.mkForce "${pkgs.wpa_supplicant}/sbin/wpa_supplicant -c /etc/wpa_supplicant/wifi.conf -i wlan0";
           # A single failed start otherwise leaves wifi down for the whole boot.
           Restart = lib.mkForce "on-failure";
           RestartSec = 3;
