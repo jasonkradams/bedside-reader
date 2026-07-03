@@ -223,8 +223,37 @@ let
       echo "Flashing $IMG to $RDISK..."
       echo "This requires sudo privileges."
       zstdcat "$IMG" | sudo dd of="$RDISK" bs=1M
-      
-      echo "Done! You can now eject the SD card."
+      sync
+
+      # --- Provision Wi-Fi (kept out of git, the Nix store, and the image) ---
+      # Inject your local, gitignored secrets/wireless.env onto the freshly
+      # written boot partition so the device connects on first boot. Override
+      # the path with BEDSIDE_WIRELESS_ENV if you keep it somewhere else.
+      WIRELESS_ENV="''${BEDSIDE_WIRELESS_ENV:-secrets/wireless.env}"
+
+      echo "Re-reading partition table and mounting the boot partition..."
+      diskutil mountDisk "$DISK" >/dev/null 2>&1 || true
+      sleep 2
+      BOOT_MP="$(diskutil info "''${DISK}s1" 2>/dev/null | awk -F': +' '/Mount Point/ {print $2}' | sed 's/[[:space:]]*$//' || true)"
+      if [ -z "$BOOT_MP" ]; then
+        diskutil mount "''${DISK}s1" >/dev/null 2>&1 || true
+        BOOT_MP="$(diskutil info "''${DISK}s1" 2>/dev/null | awk -F': +' '/Mount Point/ {print $2}' | sed 's/[[:space:]]*$//' || true)"
+      fi
+
+      if [ ! -f "$WIRELESS_ENV" ]; then
+        echo "WARNING: no $WIRELESS_ENV found - the card will boot WITHOUT Wi-Fi."
+        echo "         cp secrets/wireless.env.example secrets/wireless.env, fill it in, then re-run."
+      elif [ -z "$BOOT_MP" ]; then
+        echo "WARNING: could not mount ''${DISK}s1 to inject Wi-Fi."
+        echo "         Copy $WIRELESS_ENV onto the BEDSIDEBOOT partition manually before booting."
+      else
+        cp "$WIRELESS_ENV" "$BOOT_MP/wireless.env"
+        echo "Wi-Fi credentials written to $BOOT_MP/wireless.env"
+      fi
+
+      echo "Ejecting $DISK..."
+      diskutil eject "$DISK" >/dev/null 2>&1 || true
+      echo "Done! Move the card to the Pi and boot."
     '';
   };
 
