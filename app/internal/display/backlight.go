@@ -4,6 +4,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 func SetBacklight(on bool) {
@@ -23,18 +25,30 @@ func SetBacklight(on bool) {
 	}
 
 	// Fallback to raw sysfs GPIO 13 if no backlight class device exists
-	if _, err := os.Stat("/sys/class/gpio/gpio13"); os.IsNotExist(err) {
-		// Export GPIO 13
-		if err := os.WriteFile("/sys/class/gpio/export", []byte("13"), 0200); err == nil {
+	// We must calculate the GPIO base offset dynamically
+	gpioNum := "13"
+	if matches, err := filepath.Glob("/sys/class/gpio/gpiochip*/base"); err == nil && len(matches) > 0 {
+		if content, err := os.ReadFile(matches[0]); err == nil {
+			if base, err := strconv.Atoi(strings.TrimSpace(string(content))); err == nil {
+				gpioNum = strconv.Itoa(base + 13)
+			}
+		}
+	}
+
+	gpioPath := "/sys/class/gpio/gpio" + gpioNum
+
+	if _, err := os.Stat(gpioPath); os.IsNotExist(err) {
+		// Export the GPIO
+		if err := os.WriteFile("/sys/class/gpio/export", []byte(gpioNum), 0200); err == nil {
 			// Set direction to out
-			os.WriteFile("/sys/class/gpio/gpio13/direction", []byte("out"), 0644)
+			os.WriteFile(gpioPath+"/direction", []byte("out"), 0644)
 		} else {
-			log.Printf("Failed to export GPIO 13: %v", err)
+			log.Printf("Failed to export GPIO %s: %v", gpioNum, err)
 			return
 		}
 	}
 	
-	if err := os.WriteFile("/sys/class/gpio/gpio13/value", []byte(val), 0644); err != nil {
-		log.Printf("Failed to set GPIO 13 backlight: %v", err)
+	if err := os.WriteFile(gpioPath+"/value", []byte(val), 0644); err != nil {
+		log.Printf("Failed to set GPIO %s backlight: %v", gpioNum, err)
 	}
 }

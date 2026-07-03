@@ -192,11 +192,6 @@
 
         serviceConfig = {
           Type = "notify";
-          # Export GPIO 13 (backlight) as root before starting, and make it writable by nobody.
-          # If sysfs fails (e.g. pin already claimed by kernel pinctrl), we ignore it and continue.
-          ExecStartPre = [
-            "+${pkgs.bash}/bin/bash -c 'if [ ! -d /sys/class/gpio/gpio13 ]; then echo 13 > /sys/class/gpio/export || true; sleep 0.1; fi; echo out > /sys/class/gpio/gpio13/direction || true; chown nobody:video /sys/class/gpio/gpio13/value || true'"
-          ];
           ExecStart = "${bedside-app}/bin/bedside";
           Restart = "always";
           RestartSec = 2;
