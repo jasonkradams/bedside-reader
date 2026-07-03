@@ -68,11 +68,12 @@
         };
 
         bedside-pi = { ... }: {
+          nixpkgs.hostPlatform = "aarch64-linux";
           deployment = {
             targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
             targetUser = "root";
-            # Use cross-compilation if the deployment is initiated from macOS
-            buildOnTarget = false;
+            # Build on target so macOS users don't need a Linux builder for small updates
+            buildOnTarget = true;
           };
           
           imports = [
@@ -84,12 +85,12 @@
 
       nixosConfigurations = {
         bedside-pi = nixpkgs.lib.nixosSystem {
-          system = "aarch64-linux";
           specialArgs = {
             inherit self;
             bedside-app = self.packages.aarch64-linux.bedside-app;
           };
           modules = [
+            { nixpkgs.hostPlatform = "aarch64-linux"; }
             "${nixpkgs}/nixos/modules/installer/sd-card/sd-image-aarch64.nix"
             nixos-hardware.nixosModules.raspberry-pi-3
             ./system/configuration.nix
