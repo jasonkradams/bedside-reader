@@ -69,8 +69,8 @@
           deployment = {
             targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
             targetUser = "root";
-            # Build on target so macOS users don't need a Linux builder for small updates
-            buildOnTarget = true;
+            # Use cross-compilation or Docker if the deployment is initiated from macOS
+            buildOnTarget = false;
           };
           
           imports = [

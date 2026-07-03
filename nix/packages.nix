@@ -256,6 +256,36 @@ let
       echo "Done! Move the card to the Pi and boot."
     '';
   };
+  # Script to natively cross-compile updates via Docker and deploy over SSH
+  deploy-os = pkgs.writeShellApplication {
+    name = "deploy-os";
+    text = ''
+      echo "Deploying updates to Pi natively via Docker Virtualization.framework..."
+      
+      # Create a persistent volume for the Nix store so subsequent builds are fast
+      docker volume create nixos-builder-store >/dev/null || true
+      
+      echo "Starting builder container..."
+      # We mount ~/.ssh so colmena can authenticate to the Pi as root.
+      docker run --rm -it \
+        -v "$PWD":/workspace \
+        -v nixos-builder-store:/nix \
+        -v "$HOME/.ssh":/root/.ssh:ro \
+        -w /workspace \
+        nixos/nix:latest \
+        bash -c "
+          set -e
+          
+          echo 'Cleaning up orphaned cache...'
+          nix-collect-garbage >/dev/null 2>&1 || true
+          
+          echo 'Running colmena apply...'
+          nix run --extra-experimental-features 'nix-command flakes' nixpkgs#colmena apply
+        "
+      
+      echo "Done!"
+    '';
+  };
 
 in
 {
@@ -265,6 +295,7 @@ in
     bedside-app
     build-os
     flash-os
+    deploy-os
     go_1_26_4
     ;
   default = audible-convert;
