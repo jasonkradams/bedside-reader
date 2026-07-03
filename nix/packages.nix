@@ -262,20 +262,36 @@ let
     text = ''
       echo "Deploying updates to Pi natively via Docker Virtualization.framework..."
       
+      # Generate a temporary SSH key for Docker to use
+      rm -rf .tmp-ssh
+      mkdir -p .tmp-ssh
+      ssh-keygen -t ed25519 -f .tmp-ssh/id_ed25519 -N "" -q
+      
+      # Authorize it on the Pi using macOS native SSH (which uses your agent/config)
+      echo "Authorizing temporary Docker SSH key on the Pi..."
+      cat .tmp-ssh/id_ed25519.pub | ssh root@10.136.117.83 "mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys"
+      
       # Create a persistent volume for the Nix store so subsequent builds are fast
       docker volume create nixos-builder-store >/dev/null || true
       
       echo "Starting builder container..."
-      # We forward the Docker Desktop SSH agent socket so it can use macOS Keychain keys
       docker run --rm \
         -v "$PWD":/workspace \
         -v nixos-builder-store:/nix \
-        -v /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock \
-        -e SSH_AUTH_SOCK="/run/host-services/ssh-auth.sock" \
+        -v "$PWD/.tmp-ssh":/tmp/ssh:ro \
         -w /workspace \
         nixos/nix:latest \
         bash -c "
           set -e
+          
+          mkdir -p /root/.ssh
+          cp /tmp/ssh/id_ed25519 /root/.ssh/
+          chmod 600 /root/.ssh/id_ed25519
+          
+          echo 'Host *' > /root/.ssh/config
+          echo '  StrictHostKeyChecking accept-new' >> /root/.ssh/config
+          echo '  IdentityFile /root/.ssh/id_ed25519' >> /root/.ssh/config
+          chmod 600 /root/.ssh/config
           
           echo 'Cleaning up orphaned cache...'
           nix-collect-garbage >/dev/null 2>&1 || true
@@ -283,7 +299,9 @@ let
           echo 'Running colmena apply...'
           nix run --extra-experimental-features 'nix-command flakes' nixpkgs#colmena apply
         "
-      
+        
+      # Cleanup
+      rm -rf .tmp-ssh
       echo "Done!"
     '';
   };

@@ -72,8 +72,8 @@
           deployment = {
             targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
             targetUser = "root";
-            # Build on target directly since the Pi now has space and ZRAM
-            buildOnTarget = true;
+            # Use cross-compilation or Docker if the deployment is initiated from macOS
+            buildOnTarget = false;
           };
           
           imports = [

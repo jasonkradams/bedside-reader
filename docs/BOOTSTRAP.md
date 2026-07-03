@@ -60,10 +60,10 @@ Once complete, it will connect to the Wi-Fi network specified in your `system/co
 
 You **do not** need to rebuild the entire SD card to deploy updates to the Go application or system configuration!
 
-Once the Pi is online, you can use the `colmena apply` command to evaluate, incrementally compile, and push new Go binaries and configuration changes directly over SSH in seconds:
+Once the Pi is online, you can use the `deploy-os` script to evaluate, incrementally compile, and push new Go binaries and configuration changes directly over SSH in seconds. This script runs `colmena apply` natively inside the Docker Linux VM, completely bypassing macOS cross-compilation errors:
 
 ```bash
-nix run nixpkgs#colmena apply
+nix run .#deploy-os
 ```
 
-This will automatically connect to the Pi as `root`, build the closure on the target, and activate the new system state without requiring a reboot.
+This will automatically connect to the Pi as `root`, build the closure, and activate the new system state without requiring a reboot.
