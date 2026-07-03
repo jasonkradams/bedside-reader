@@ -29,6 +29,11 @@
   };
 
 
+  # Enable ZRAM so we have enough memory to run resize2fs on large SD cards
+  zramSwap = {
+    enable = true;
+    memoryPercent = 150; # 150% of 512MB RAM ~ 750MB compressed swap
+  };
 
   fileSystems."/" = {
     device = "/dev/disk/by-label/NIXOS_SD";

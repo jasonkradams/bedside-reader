@@ -3,9 +3,9 @@
 {
   # We use the generic AArch64 SD image structure.
   sdImage = {
-    # Disable automatic partition expansion on first boot because resize2fs of a 60GB
-    # partition on a live rootfs causes the Pi Zero 2 W (512MB RAM) to OOM/freeze.
-    expandOnBoot = false;
+    # We now have zramSwap enabled which gives the Pi enough memory to resize the
+    # 60GB filesystem without OOMing, so we can finally enable automatic expansion!
+    expandOnBoot = true;
     
     # Give the FAT32 boot partition a better name (max 11 chars)
     firmwarePartitionName = "BEDSIDEBOOT";
