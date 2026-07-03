@@ -67,7 +67,7 @@
           };
         };
 
-        bedside-pi = { ... }: {
+        bedside-reader = { ... }: {
           nixpkgs.hostPlatform = "aarch64-linux";
           deployment = {
             targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
@@ -84,7 +84,7 @@
       };
 
       nixosConfigurations = {
-        bedside-pi = nixpkgs.lib.nixosSystem {
+        bedside-reader = nixpkgs.lib.nixosSystem {
           specialArgs = {
             inherit self;
             bedside-app = self.packages.aarch64-linux.bedside-app;

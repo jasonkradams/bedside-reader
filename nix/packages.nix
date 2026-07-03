@@ -141,17 +141,17 @@ let
           
           # Run safe garbage collection. This removes old temporary files but strictly preserves
           # the base image (via its own roots) and our previous build's dependencies
-          # (via the bedside-pi-latest root we create below).
+          # (via the bedside-reader-latest root we create below).
           echo 'Cleaning up orphaned cache to prevent out-of-space errors...'
           nix-collect-garbage >/dev/null 2>&1 || true
           
           echo 'Building image...'
-          nix build --out-link /nix/var/nix/gcroots/bedside-pi-latest --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-pi.config.system.build.sdImage
+          nix build --out-link /nix/var/nix/gcroots/bedside-reader-latest --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-reader.config.system.build.sdImage
           
           echo 'Copying image out of container...'
           mkdir -p result-img
           rm -rf result-img/*.img*
-          cp -L /nix/var/nix/gcroots/bedside-pi-latest/sd-image/*.img* result-img/
+          cp -L /nix/var/nix/gcroots/bedside-reader-latest/sd-image/*.img* result-img/
           chmod 644 result-img/*.img*
         "
       
