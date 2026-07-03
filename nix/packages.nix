@@ -266,20 +266,16 @@ let
       docker volume create nixos-builder-store >/dev/null || true
       
       echo "Starting builder container..."
-      # We mount ~/.ssh read-only and copy it to fix ownership/permissions
+      # We forward the Docker Desktop SSH agent socket so it can use macOS Keychain keys
       docker run --rm \
         -v "$PWD":/workspace \
         -v nixos-builder-store:/nix \
-        -v "$HOME/.ssh":/root/host-ssh:ro \
+        -v /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock \
+        -e SSH_AUTH_SOCK="/run/host-services/ssh-auth.sock" \
         -w /workspace \
         nixos/nix:latest \
         bash -c "
           set -e
-          
-          # Fix SSH key permissions for the container's root user
-          cp -R /root/host-ssh /root/.ssh
-          chmod 700 /root/.ssh
-          find /root/.ssh -type f -exec chmod 600 {} +
           
           echo 'Cleaning up orphaned cache...'
           nix-collect-garbage >/dev/null 2>&1 || true
