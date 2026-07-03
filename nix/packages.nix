@@ -266,15 +266,20 @@ let
       docker volume create nixos-builder-store >/dev/null || true
       
       echo "Starting builder container..."
-      # We mount ~/.ssh so colmena can authenticate to the Pi as root.
+      # We mount ~/.ssh read-only and copy it to fix ownership/permissions
       docker run --rm \
         -v "$PWD":/workspace \
         -v nixos-builder-store:/nix \
-        -v "$HOME/.ssh":/root/.ssh:ro \
+        -v "$HOME/.ssh":/root/host-ssh:ro \
         -w /workspace \
         nixos/nix:latest \
         bash -c "
           set -e
+          
+          # Fix SSH key permissions for the container's root user
+          cp -R /root/host-ssh /root/.ssh
+          chmod 700 /root/.ssh
+          find /root/.ssh -type f -exec chmod 600 {} +
           
           echo 'Cleaning up orphaned cache...'
           nix-collect-garbage >/dev/null 2>&1 || true
