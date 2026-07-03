@@ -63,7 +63,7 @@ You **do not** need to rebuild the entire SD card to deploy updates to the Go ap
 Once the Pi is online, you can use the `deploy-os` script to evaluate, incrementally compile, and push new Go binaries and configuration changes directly over SSH in seconds. This script runs `colmena apply` natively inside the Docker Linux VM, completely bypassing macOS cross-compilation errors:
 
 ```bash
-nix run .#deploy-os
+deploy-os
 ```
 
 This will automatically connect to the Pi as `root`, build the closure, and activate the new system state without requiring a reboot.

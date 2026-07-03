@@ -38,6 +38,11 @@
             type = "app";
             program = "${self.packages.${system}.build-os}/bin/build-os";
           };
+
+          deploy-os = {
+            type = "app";
+            program = "${self.packages.${system}.deploy-os}/bin/deploy-os";
+          };
         }
       );
 
@@ -49,6 +54,7 @@
 
               self.packages.${system}.build-os
               self.packages.${system}.flash-os
+              self.packages.${system}.deploy-os
               self.packages.${system}.go_1_26_4
               pkgs.colmena
             ];
