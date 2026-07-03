@@ -35,7 +35,6 @@
     cat ${./boot/config.txt} >> firmware/config.txt
 
     cp ${./boot/panel.bin} firmware/panel.bin
-    cp ${./boot/user-data} firmware/user-data
     cp ${../boot/wireless.env.example} firmware/wireless.env.example
   '';
 
