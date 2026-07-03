@@ -153,23 +153,23 @@ func (a *App) handleEncoderSingleClick() {
 	}
 }
 
-// nextScreenTimeout advances the screen-timeout setting (in minutes) through the
-// cycle 0 (off), 1, 5, 15, 60, and back to 0. Unrecognized values reset to 5.
+// defaultScreenTimeout is used when the stored value isn't one of the options.
+const defaultScreenTimeout = 5
+
+// screenTimeoutCycle is the ordered ring the settings UI steps through, and the
+// single source of truth: reorder or add an option here and nextScreenTimeout follows.
+var screenTimeoutCycle = []int{0, 1, 5, 15, 60}
+
+// nextScreenTimeout returns the option after current in screenTimeoutCycle,
+// wrapping past the end back to the start. An unrecognized current falls back
+// to defaultScreenTimeout.
 func nextScreenTimeout(current int) int {
-	switch current {
-	case 0:
-		return 1
-	case 1:
-		return 5
-	case 5:
-		return 15
-	case 15:
-		return 60
-	case 60:
-		return 0
-	default:
-		return 5
+	for i, v := range screenTimeoutCycle {
+		if v == current {
+			return screenTimeoutCycle[(i+1)%len(screenTimeoutCycle)]
+		}
 	}
+	return defaultScreenTimeout
 }
 
 func (a *App) cycleScreenTimeout() {
@@ -200,12 +200,12 @@ func (a *App) handleEncoderToggle() {
 	} else {
 		a.encoderMode = "scrub"
 	}
-	
+
 	// Save the encoder mode to persistence
 	sysState, _ := a.lib.GetSystemState()
 	sysState.EncoderMode = a.encoderMode
 	_ = a.lib.SaveSystemState(sysState)
-	
+
 	a.publishMain()
 }
 
