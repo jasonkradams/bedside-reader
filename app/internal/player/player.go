@@ -98,7 +98,7 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
 	// Wait for the socket to be created
 	var conn net.Conn
 	var err error
-	for range 50 {
+	for range 150 {
 		time.Sleep(100 * time.Millisecond)
 		conn, err = net.Dial("unix", ipcSocket)
 		if err == nil {
