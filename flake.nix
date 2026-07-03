@@ -58,6 +58,9 @@
 
       colmena = {
         meta = {
+          nixpkgs = import nixpkgs {
+            system = "aarch64-linux";
+          };
           specialArgs = {
             inherit self;
             bedside-app = self.packages.aarch64-linux.bedside-app;
