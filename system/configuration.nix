@@ -18,10 +18,14 @@
     supportedFilesystems = lib.mkForce [ "vfat" "ext4" ];
 
     # CONFIRMED FIX: systemd-initrd could not mount the SD root on this Pi Zero 2 W,
-    # so the board never booted (root fs Last-mount-time n/a, all logs empty) until
-    # this was flipped. The scripted initrd mounts /dev/disk/by-label/NIXOS_SD
-    # reliably. Keep disabled.
-    initrd.systemd.enable = lib.mkForce false;
+    # because the specific SD host controller drivers were missing from stage 1.
+    # By adding them explicitly, systemd-initrd works perfectly.
+    initrd.availableKernelModules = [
+      "sdhci_bcm2835"
+      "sdhci_iproc"
+      "bcm2835_dma"
+      "i2c_bcm2835"
+    ];
   };
 
   # We use the generic AArch64 SD image structure.
