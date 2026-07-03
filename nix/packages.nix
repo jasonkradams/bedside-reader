@@ -283,7 +283,14 @@ let
         nixos/nix:latest \
         bash -c "
           set -e
-          
+
+          # The repo is bind-mounted from the host and owned by the host user, not
+          # container root. Without trusting it, git reports 'dubious ownership', and
+          # nix silently falls back to a STALE cached flake source in the persistent
+          # /nix volume — deploying an old config no matter what you changed. Trusting
+          # the workdir makes nix evaluate the real current HEAD.
+          git config --global --add safe.directory '*'
+
           mkdir -p /root/.ssh
           cp /tmp/ssh/id_ed25519 /root/.ssh/
           chmod 600 /root/.ssh/id_ed25519
