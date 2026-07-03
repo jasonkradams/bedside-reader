@@ -267,7 +267,7 @@ let
       
       echo "Starting builder container..."
       # We mount ~/.ssh so colmena can authenticate to the Pi as root.
-      docker run --rm -it \
+      docker run --rm \
         -v "$PWD":/workspace \
         -v nixos-builder-store:/nix \
         -v "$HOME/.ssh":/root/.ssh:ro \
