@@ -186,9 +186,9 @@
         serviceConfig = {
           Type = "notify";
           ExecStartPre = [
-            "+${pkgs.bash}/bin/bash -c 'if [ ! -d /sys/class/gpio/gpio525 ]; then echo 525 > /sys/class/gpio/export || true; fi'"
-            "+${pkgs.coreutils}/bin/chgrp -R gpio /sys/class/gpio/gpio525 || true"
-            "+${pkgs.coreutils}/bin/chmod -R g+rw /sys/class/gpio/gpio525 || true"
+            "+${pkgs.bash}/bin/bash -c 'if [ ! -d /sys/class/gpio/gpio525 ]; then echo 525 > /sys/class/gpio/export; fi'"
+            "+-${pkgs.coreutils}/bin/chgrp -R gpio /sys/class/gpio/gpio525"
+            "+-${pkgs.coreutils}/bin/chmod -R g+rw /sys/class/gpio/gpio525"
           ];
           ExecStart = "${bedside-app}/bin/bedside";
           Restart = "always";
