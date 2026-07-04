@@ -142,17 +142,42 @@ func readTrim(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
+// panelOpenTimeout bounds how long New waits for the panel framebuffer to be
+// openable. The ST7789 probes late over SPI (~20s into boot) and udev applies
+// its `video` group a moment after the node appears, so opening too early
+// returns ENOENT or EACCES. Retrying avoids crashing on boot (which otherwise
+// forces a systemd restart and adds ~4-5s to first playback).
+const panelOpenTimeout = 20 * time.Second
+
+// openPanelFramebuffer discovers and opens the panel's framebuffer, retrying
+// until it succeeds or timeout elapses (see panelOpenTimeout for why).
+func openPanelFramebuffer(timeout time.Duration) (*os.File, string, error) {
+	deadline := time.Now().Add(timeout)
+	for attempt := 0; ; attempt++ {
+		path, err := panelFramebuffer()
+		if err == nil {
+			f, oerr := os.OpenFile(path, os.O_RDWR, 0)
+			if oerr == nil {
+				return f, path, nil
+			}
+			err = oerr
+		}
+		if time.Now().After(deadline) {
+			return nil, "", fmt.Errorf("panel framebuffer not ready after %s: %w", timeout, err)
+		}
+		if attempt == 0 {
+			log.Printf("UI: waiting for panel framebuffer to be ready: %v", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
-	fbPath, err := panelFramebuffer()
+	fbFile, fbPath, err := openPanelFramebuffer(panelOpenTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to locate panel framebuffer: %w", err)
+		return nil, err
 	}
 	log.Printf("UI rendering to panel framebuffer %s", fbPath)
-
-	fbFile, err := os.OpenFile(fbPath, os.O_RDWR, 0)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open %s: %w", fbPath, err)
-	}
 
 	// Memory map the framebuffer (320x240, 16-bit color = 153600 bytes)
 	fbSize := panelWidth * panelHeight * 2
