@@ -272,6 +272,15 @@ func (p *Player) saveCurrentState() {
 	}
 }
 
+// PersistNow immediately flushes the current playback position and system state
+// to disk. Called on shutdown so a reboot resumes exactly where playback stopped,
+// rather than up to one 10s save-interval (or a just-loaded book) behind.
+func (p *Player) PersistNow() {
+	p.reqMutex.Lock()
+	defer p.reqMutex.Unlock()
+	p.saveCurrentState()
+}
+
 func (p *Player) loadNewState(path string) {
 	p.currentPath = path
 	p.State.FilePath = filepath.Base(path)

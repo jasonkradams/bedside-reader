@@ -115,7 +115,7 @@ let
     pname = "bedside-app";
     version = "1.0.0";
     src = ../app; # Adjust path relative to this file
-    vendorHash = "sha256-Vx7nni+nBUEo8jbq3miWOgXOQ6VMhn3Xrg8rOQWeLk8=";
+    vendorHash = "sha256-Njsdcmf7MrNVCmxhdqNiJP/DK8dBNcoZuqUvpGuqV+8=";
     ldflags = [ "-s" "-w" ]; # strip DWARF + symbol table (image-size lever)
   };
 

@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	go.etcd.io/bbolt v1.5.0
 	periph.io/x/conn/v3 v3.7.3
 	periph.io/x/host/v3 v3.8.5

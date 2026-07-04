@@ -2,6 +2,7 @@ package library
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,7 +12,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"go.etcd.io/bbolt"
 )
@@ -49,10 +53,12 @@ type Progress struct {
 
 // Manager handles the database and scanning
 type Manager struct {
-	db       *bbolt.DB
-	bus      *bus.Bus
-	audioDir string
-	coverDir string
+	db        *bbolt.DB
+	bus       *bus.Bus
+	audioDir  string
+	coverDir  string
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 func New(eventBus *bus.Bus, dbPath, audioDir, coverDir string) (*Manager, error) {
@@ -91,14 +97,70 @@ func New(eventBus *bus.Bus, dbPath, audioDir, coverDir string) (*Manager, error)
 		bus:      eventBus,
 		audioDir: audioDir,
 		coverDir: coverDir,
+		stop:     make(chan struct{}),
 	}
 
 	return m, nil
 }
 
-// Close closes the underlying boltdb
+// Close stops the directory watcher and closes the underlying boltdb.
 func (m *Manager) Close() {
+	m.closeOnce.Do(func() { close(m.stop) })
 	m.db.Close()
+}
+
+// Watch runs an initial scan, then rescans whenever the audiobook directory
+// changes, instead of polling. Uploads emit a burst of write events, so scans
+// are debounced until the directory goes quiet. Runs until Close.
+func (m *Manager) Watch() {
+	m.Scan() // initial pass (also backfills cover art)
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("library: watcher unavailable, covers update only at startup: %v", err)
+		return
+	}
+	defer w.Close()
+	if err := w.Add(m.audioDir); err != nil {
+		log.Printf("library: watch %s failed: %v", m.audioDir, err)
+		return
+	}
+
+	debounce := time.NewTimer(time.Hour)
+	debounce.Stop()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case ev, ok := <-w.Events:
+			if !ok {
+				return
+			}
+			if isAudioEvent(ev) {
+				debounce.Reset(5 * time.Second)
+			}
+		case err, ok := <-w.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("library: watch error: %v", err)
+		case <-debounce.C:
+			m.Scan()
+		}
+	}
+}
+
+// isAudioEvent reports whether ev is a create/write/rename/remove of an
+// audiobook file worth rescanning for.
+func isAudioEvent(ev fsnotify.Event) bool {
+	if ev.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename|fsnotify.Remove) == 0 {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(ev.Name)) {
+	case ".m4b", ".mp3", ".m4a":
+		return true
+	}
+	return false
 }
 
 // Scan crawls the audio directory and uses ffprobe to parse metadata
@@ -218,7 +280,7 @@ func (m *Manager) ensureCover(book *Audiobook) bool {
 // extractCover writes a downscaled JPEG of the audiobook's embedded cover art to
 // dst via ffmpeg. Returns a non-nil error when the file has no attached picture.
 func extractCover(src, dst string) error {
-	cmd := exec.Command("ffmpeg",
+	err := execContained(30*time.Second, nil, "ffmpeg",
 		"-y", "-v", "error",
 		"-i", src,
 		"-an",
@@ -228,27 +290,49 @@ func extractCover(src, dst string) error {
 		"-q:v", "3",
 		dst,
 	)
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		os.Remove(dst) // don't leave a partial/zero-byte file behind
 		return fmt.Errorf("ffmpeg cover extract: %w", err)
 	}
 	return nil
 }
 
+// execContained runs name+args with a hard timeout and at the nicest CPU / idle
+// I/O priority, so metadata probing and cover extraction can never hang the
+// scanner or steal cycles from playback. If stdout is non-nil it captures the
+// command's stdout.
+func execContained(timeout time.Duration, stdout *bytes.Buffer, name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	lowerPriority(cmd.Process.Pid)
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("%s timed out after %s", name, timeout)
+		}
+		return err
+	}
+	return nil
+}
+
 // probeFile runs ffprobe to extract metadata and chapters from an audiobook file.
 func (m *Manager) probeFile(path, id string) (*Audiobook, error) {
-	cmd := exec.Command("ffprobe",
+	var out bytes.Buffer
+	if err := execContained(60*time.Second, &out, "ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
 		"-show_chapters",
 		"-show_streams",
 		path,
-	)
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	); err != nil {
 		return nil, fmt.Errorf("ffprobe failed: %w", err)
 	}
 

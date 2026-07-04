@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"github.com/jasonkradams/bedside-reader/internal/input"
@@ -64,13 +63,9 @@ func main() {
 	app := NewApp(eventBus, lib, gui, mpv, sysState)
 	go app.Run()
 
-	// 7. Trigger a periodic background scan of audiobooks
-	go func() {
-		for {
-			lib.Scan()
-			time.Sleep(5 * time.Minute)
-		}
-	}()
+	// 7. Watch the audiobook directory and (re)scan on changes — event-driven,
+	// not polling. Runs an initial scan, then debounced rescans on uploads.
+	go lib.Watch()
 
 	// 8. Notify systemd that the service is ready
 	systemd.NotifyReady()
@@ -84,4 +79,5 @@ func main() {
 	<-c
 
 	log.Println("Shutting down Bedside...")
+	mpv.PersistNow() // flush position/state so a reboot resumes where we stopped
 }
