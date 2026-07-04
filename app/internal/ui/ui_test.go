@@ -10,6 +10,38 @@ import (
 	"github.com/jasonkradams/bedside-reader/internal/player"
 )
 
+func TestPickPanelFB(t *testing.T) {
+	t.Run("prefers panel driver name over HDMI framebuffers", func(t *testing.T) {
+		fbs := []fbInfo{
+			{dev: "/dev/fb0", name: "BCM2708 FB", geometry: "720,480"},
+			{dev: "/dev/fb1", name: "simpledrmdrmfb", geometry: "720,480"},
+			{dev: "/dev/fb2", name: "panel-mipi-dbid", geometry: "320,240"},
+		}
+		if got, ok := pickPanelFB(fbs); !ok || got != "/dev/fb2" {
+			t.Errorf("pickPanelFB = %q, %v; want /dev/fb2, true", got, ok)
+		}
+	})
+
+	t.Run("falls back to 320x240 geometry when no name matches", func(t *testing.T) {
+		fbs := []fbInfo{
+			{dev: "/dev/fb0", name: "BCM2708 FB", geometry: "720,480"},
+			{dev: "/dev/fb1", name: "mysteryfb", geometry: "320,240"},
+		}
+		if got, ok := pickPanelFB(fbs); !ok || got != "/dev/fb1" {
+			t.Errorf("pickPanelFB = %q, %v; want /dev/fb1, true", got, ok)
+		}
+	})
+
+	t.Run("no panel and no matching geometry returns false", func(t *testing.T) {
+		fbs := []fbInfo{
+			{dev: "/dev/fb0", name: "BCM2708 FB", geometry: "720,480"},
+		}
+		if got, ok := pickPanelFB(fbs); ok {
+			t.Errorf("pickPanelFB = %q, %v; want \"\", false", got, ok)
+		}
+	})
+}
+
 func TestTruncate(t *testing.T) {
 	cases := []struct {
 		name string

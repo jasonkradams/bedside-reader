@@ -2,12 +2,26 @@ package player
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
-	"periph.io/x/conn/v3/gpio"
 )
+
+func TestMpvArgs_UsesExplicitAudioDevice(t *testing.T) {
+	joined := strings.Join(mpvArgs("/tmp/x.sock"), " ")
+
+	if !strings.Contains(joined, "--audio-device="+audioDevice) {
+		t.Errorf("mpv args missing explicit audio device %q: %s", audioDevice, joined)
+	}
+	if !strings.Contains(joined, "--ao=alsa") {
+		t.Errorf("mpv args missing --ao=alsa: %s", joined)
+	}
+	if !strings.Contains(joined, "--input-ipc-server=/tmp/x.sock") {
+		t.Errorf("mpv args missing ipc server socket: %s", joined)
+	}
+}
 
 func TestPlayer_Success_SeekWhenPaused(t *testing.T) {
 	// Setup dummy player
@@ -34,53 +48,6 @@ func TestPlayer_Success_SeekWhenPaused(t *testing.T) {
 	// Assert
 	if !seekSent {
 		t.Errorf("fail: expected seek command to be sent to mpv even when paused, but it was swallowed")
-	}
-}
-
-type mockPin struct {
-	gpio.PinOut
-	level gpio.Level
-}
-
-func (m *mockPin) Out(l gpio.Level) error {
-	m.level = l
-	return nil
-}
-
-func TestPlayer_Success_FileLoadedWhenPausedMutes(t *testing.T) {
-	b := bus.New()
-
-	mp := &mockPin{level: gpio.Low}
-	p := &Player{
-		bus:     b,
-		mutePin: mp,
-		State:   PlaybackState{Paused: true}, // Player is PAUSED
-	}
-	p.sendCommandMock = func(command ...any) error { return nil }
-
-	p.handleFileLoaded()
-
-	// Wait 150ms since it spawns a goroutine
-	time.Sleep(150 * time.Millisecond)
-
-	if mp.level == gpio.High {
-		t.Errorf("fail: expected hardware to remain muted (gpio.Low) if player is paused, but it was unmuted (gpio.High)")
-	}
-}
-
-func TestPlayer_Success_TriggerMuteWhenPaused(t *testing.T) {
-	mp := &mockPin{level: gpio.Low}
-	p := &Player{
-		mutePin: mp,
-		State:   PlaybackState{Paused: true}, // Player is PAUSED
-	}
-
-	// Act
-	p.triggerMute()
-
-	// Assert
-	if mp.level != gpio.Low {
-		t.Errorf("fail: expected mute pin to stay Low when triggerMute is called while paused, but got %v", mp.level)
 	}
 }
 
@@ -128,45 +95,9 @@ func TestPlayer_Success_HandleTimePosUpdatesPosition(t *testing.T) {
 		lastSave: time.Now(), // recent save so the periodic DB write is skipped (no lib in test)
 	}
 
-	// 42.5s into a 100s file: far from EOF, so no mute timer should be armed.
 	p.handleTimePos(42.5)
 
 	if p.State.Position != 42.5 {
 		t.Errorf("fail: expected Position to be updated to 42.5, got %v", p.State.Position)
 	}
-	if p.eofMuteTimer != nil {
-		t.Errorf("fail: expected no EOF mute timer far from end of file, but one was armed")
-	}
-}
-
-func TestPlayer_Success_MutesBeforeEOF(t *testing.T) {
-	b := bus.New()
-	mp := &mockPin{level: gpio.High}
-	p := &Player{
-		bus:      b,
-		mutePin:  mp,
-		isIdle:   false,
-		State:    PlaybackState{Duration: 100, Position: 90},
-		lastSave: time.Now(),
-	}
-
-	// We don't need listen(), we can just call handleTimePos(val) if we extract it,
-	// or we can just simulate the JSON payload over net.Pipe.
-	client, server := net.Pipe()
-	p.conn = client
-	go p.listen()
-
-	// Send time-pos update close to duration
-	_, _ = server.Write([]byte(`{"event": "property-change", "name": "time-pos", "data": 99.9}` + "\n"))
-
-	time.Sleep(50 * time.Millisecond)
-
-	p.reqMutex.Lock()
-	defer p.reqMutex.Unlock()
-
-	if mp.level != gpio.Low {
-		t.Errorf("fail: expected mute pin to be Low when near EOF to prevent pop, got %v", mp.level)
-	}
-
-	server.Close()
 }

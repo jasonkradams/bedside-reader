@@ -86,6 +86,24 @@
     pkgs.mpv
   ];
 
+  # Pin ALSA's "default" PCM to the MAX98357A I2S card (card 0). Without this the
+  # auto-generated default can resolve to a nonexistent card, so any bare-default
+  # ALSA open fails with "Unknown PCM default". Routing through "plug" also lets
+  # it convert arbitrary source sample rate/format for the fixed-rate I2S link.
+  # The bedside app names the card explicitly too, so it does not depend on this;
+  # this keeps the system default sane for any other ALSA consumer (and matches
+  # between a fresh flash and an incremental deploy).
+  environment.etc."asound.conf".text = ''
+    pcm.!default {
+      type plug
+      slave.pcm "hw:0,0"
+    }
+    ctl.!default {
+      type hw
+      card 0
+    }
+  '';
+
   # Ensure the bedside user and required groups exist
   users = {
     groups.bedside = { };

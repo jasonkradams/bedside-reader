@@ -13,11 +13,33 @@ import (
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"github.com/jasonkradams/bedside-reader/internal/library"
-	"periph.io/x/conn/v3/gpio"
-	"periph.io/x/conn/v3/gpio/gpioreg"
 )
 
 const ipcSocket = "/var/lib/bedside/mpv.sock"
+
+// audioDevice pins mpv to the MAX98357A I2S DAC by its stable ALSA card name.
+// The ALSA "default" PCM on this build can resolve to a nonexistent card, so a
+// bare --ao=alsa fails to open any device ("Unknown PCM default"); naming the
+// card explicitly and routing through "plug" (for rate/format conversion of
+// arbitrary source audio) is what actually produces sound. The MAX98357A's
+// enable pin (GPIO26) is owned by the kernel max98357a driver via the DT overlay
+// (sdmode-pin=26) and is driven automatically by DAPM on stream start/stop — the
+// app deliberately does not touch it (doing so races the kernel and mutes audio).
+const audioDevice = "alsa/plughw:CARD=MAX98357A,DEV=0"
+
+// mpvArgs builds the mpv daemon argument list. Split out from New so the audio
+// device selection is unit-testable without launching mpv.
+func mpvArgs(socket string) []string {
+	return []string{
+		"--idle",
+		"--no-video",
+		"--really-quiet",
+		"--no-config",
+		"--ao=alsa",
+		"--audio-device=" + audioDevice,
+		"--input-ipc-server=" + socket,
+	}
+}
 
 // Player controls the mpv subprocess and exposes playback controls
 type Player struct {
@@ -32,27 +54,10 @@ type Player struct {
 	lastSave    time.Time
 	isIdle      bool
 
-	mutePin      gpio.PinOut
-	muteTimer    *time.Timer
-	eofMuteTimer *time.Timer
-
 	State PlaybackState
 
 	// Test hook
 	sendCommandMock func(command ...any) error
-}
-
-// triggerMute temporarily pulls the hardware mute pin low to mask I2S clock transients
-func (p *Player) triggerMute() {
-	if p.mutePin != nil && !p.State.Paused {
-		p.mutePin.Out(gpio.Low)
-		if p.muteTimer != nil {
-			p.muteTimer.Stop()
-		}
-		p.muteTimer = time.AfterFunc(100*time.Millisecond, func() {
-			p.mutePin.Out(gpio.High)
-		})
-	}
 }
 
 // PlaybackState represents the current state of the player
@@ -68,28 +73,15 @@ type PlaybackState struct {
 func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
 	os.Remove(ipcSocket)
 
-	pin := gpioreg.ByName("GPIO26")
-	if pin != nil {
-		pin.Out(gpio.Low) // Start muted
-	}
-
 	p := &Player{
 		bus:         eventBus,
 		lib:         lib,
 		currentPath: "",
-		mutePin:     pin,
 		State:       PlaybackState{Volume: 50, Paused: true},
 	}
 
 	// Start mpv as a background daemon
-	p.cmd = exec.Command("mpv",
-		"--idle",
-		"--no-video",
-		"--really-quiet",
-		"--no-config",
-		"--ao=alsa",
-		fmt.Sprintf("--input-ipc-server=%s", ipcSocket),
-	)
+	p.cmd = exec.Command("mpv", mpvArgs(ipcSocket)...)
 
 	if err := p.cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start mpv: %w", err)
@@ -189,36 +181,12 @@ func (p *Player) handlePropertyChange(msg map[string]any) {
 	}
 }
 
-// handleTimePos processes a playback position update: it broadcasts progress,
-// arms the pre-EOF hardware mute, and throttles progress persistence.
+// handleTimePos processes a playback position update: it broadcasts progress and
+// throttles progress persistence.
 func (p *Player) handleTimePos(val float64) {
 	p.State.Position = val
 	p.bus.Publish(bus.EventPlayerProgressTick, p.State)
-	p.muteBeforeEOF()
 	p.persistProgressPeriodically()
-}
-
-// muteBeforeEOF pulls the hardware mute low shortly before the track ends to
-// mask the ALSA pop, and cancels a scheduled mute if playback moves away again.
-func (p *Player) muteBeforeEOF() {
-	if p.State.Duration <= 0 {
-		return
-	}
-	remaining := p.State.Duration - p.State.Position
-	switch {
-	case remaining > 0 && remaining <= 3.0 && p.eofMuteTimer == nil:
-		delay := remaining - 0.25 // Mute 250ms before EOF
-		if delay < 0 {
-			delay = 0
-		}
-		p.eofMuteTimer = time.AfterFunc(time.Duration(delay*float64(time.Second)), func() {
-			if p.mutePin != nil {
-				_ = p.mutePin.Out(gpio.Low)
-			}
-		})
-	case remaining > 3.0:
-		p.cancelEofMuteTimer()
-	}
 }
 
 // persistProgressPeriodically saves playback position and system state to disk
@@ -239,21 +207,10 @@ func (p *Player) handleFileLoaded() {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
 	p.isIdle = false
-	p.cancelEofMuteTimer()
 
-	// Unmute the audio now that the file is fully loaded and ready to play
+	// Unmute the digital stream now that the file is fully loaded and ready to
+	// play (it was muted during the load transition to mask the buffer-fill pop).
 	p.sendCommandNoLock("set_property", "mute", false)
-	if p.mutePin != nil {
-		// Delay unmute to allow ALSA stream to settle (masks the mpv load pop)
-		go func() {
-			time.Sleep(750 * time.Millisecond)
-			p.reqMutex.Lock()
-			defer p.reqMutex.Unlock()
-			if !p.State.Paused {
-				_ = p.mutePin.Out(gpio.High) // Hardware Unmute
-			}
-		}()
-	}
 
 	if p.pendingSeek > 0 {
 		p.sendCommandNoLock("seek", p.pendingSeek, "absolute", "exact")
@@ -333,17 +290,13 @@ func (p *Player) loadNewState(path string) {
 	}
 }
 
+// muteForTransition mutes mpv's digital output while a new file is loading, so
+// the buffer-fill pop is masked. handleFileLoaded unmutes once playback is ready.
 func (p *Player) muteForTransition() {
 	_ = p.sendCommand("set_property", "mute", true)
-	if p.mutePin != nil {
-		_ = p.mutePin.Out(gpio.Low) // Keep mute until Play/Resume
-		if p.muteTimer != nil {
-			p.muteTimer.Stop()
-		}
-	}
 }
 
-// TogglePause toggles playback state using Deep Sleep (stops mpv to close ALSA device)
+// TogglePause toggles playback state
 func (p *Player) TogglePause() error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
@@ -372,7 +325,6 @@ func (p *Player) resume() {
 	sysState.Playing = true
 	_ = p.lib.SaveSystemState(sysState)
 	_ = p.sendCommandNoLock("set_property", "pause", false)
-	p.triggerMute()
 }
 
 func (p *Player) pause() {
@@ -383,13 +335,6 @@ func (p *Player) pause() {
 	_ = p.lib.SaveSystemState(sysState)
 	_ = p.sendCommandNoLock("set_property", "pause", true)
 
-	if p.mutePin != nil {
-		_ = p.mutePin.Out(gpio.Low) // Hardware Mute (Kills DAC hiss!)
-		if p.muteTimer != nil {
-			p.muteTimer.Stop()
-		}
-	}
-
 	// Immediately save progress to disk
 	_ = p.lib.SaveProgress(p.State.FilePath, p.State.Position)
 }
@@ -398,9 +343,6 @@ func (p *Player) pause() {
 func (p *Player) Seek(deltaSeconds float64) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
-
-	p.cancelEofMuteTimer()
-	p.triggerMute()
 	return p.sendCommandNoLock("seek", deltaSeconds, "relative", "exact")
 }
 
@@ -408,9 +350,6 @@ func (p *Player) Seek(deltaSeconds float64) error {
 func (p *Player) SkipChapter(delta int) error {
 	p.reqMutex.Lock()
 	defer p.reqMutex.Unlock()
-
-	p.cancelEofMuteTimer()
-	p.triggerMute()
 	return p.sendCommandNoLock("add", "chapter", delta)
 }
 
@@ -422,13 +361,6 @@ func (p *Player) SetVolume(volume float64) error {
 		volume = 100
 	}
 	return p.sendCommand("set_property", "volume", volume)
-}
-
-func (p *Player) cancelEofMuteTimer() {
-	if p.eofMuteTimer != nil {
-		p.eofMuteTimer.Stop()
-		p.eofMuteTimer = nil
-	}
 }
 
 // Close kills the mpv process

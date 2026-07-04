@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,15 +53,83 @@ type Renderer struct {
 	wifiConnected bool
 }
 
-func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
-	// Open the framebuffer device
-	fbFile, err := os.OpenFile("/dev/fb1", os.O_RDWR, 0)
+// Panel geometry: 320x240 ST7789 in landscape, 16bpp (RGB565).
+const (
+	panelWidth    = 320
+	panelHeight   = 240
+	panelGeometry = "320,240" // matches the sysfs virtual_size of the panel fb
+)
+
+// fbInfo is the identifying sysfs metadata for one /sys/class/graphics/fbN.
+type fbInfo struct {
+	dev      string // e.g. "/dev/fb2"
+	name     string // driver name, e.g. "panel-mipi-dbid"
+	geometry string // virtual_size, e.g. "320,240"
+}
+
+// pickPanelFB chooses the framebuffer backing the SPI panel: prefer one whose
+// driver name identifies the panel-mipi-dbi device, otherwise fall back to the
+// one matching the panel's 320x240 geometry. Returns false if neither matches.
+func pickPanelFB(fbs []fbInfo) (string, bool) {
+	for _, fb := range fbs {
+		if strings.Contains(fb.name, "panel") || strings.Contains(fb.name, "mipi-dbi") {
+			return fb.dev, true
+		}
+	}
+	for _, fb := range fbs {
+		if fb.geometry == panelGeometry {
+			return fb.dev, true
+		}
+	}
+	return "", false
+}
+
+// panelFramebuffer locates the panel's /dev/fbN. The index is NOT fixed: the
+// firmware registers its own framebuffers first (fb0/fb1 = HDMI/simpledrm), so
+// the ST7789 lands on fb2 here — but that ordering isn't guaranteed. Discover it
+// by sysfs metadata so a firmware/overlay change can't silently send the UI to
+// the HDMI framebuffer instead of the panel.
+func panelFramebuffer() (string, error) {
+	names, _ := filepath.Glob("/sys/class/graphics/fb*/name")
+	fbs := make([]fbInfo, 0, len(names))
+	for _, namePath := range names {
+		dir := filepath.Dir(namePath)       // /sys/class/graphics/fb2
+		dev := "/dev/" + filepath.Base(dir) // /dev/fb2
+		fbs = append(fbs, fbInfo{
+			dev:      dev,
+			name:     readTrim(namePath),
+			geometry: readTrim(filepath.Join(dir, "virtual_size")),
+		})
+	}
+	if dev, ok := pickPanelFB(fbs); ok {
+		return dev, nil
+	}
+	return "", fmt.Errorf("no panel framebuffer among %d devices", len(fbs))
+}
+
+// readTrim reads a sysfs attribute and trims trailing whitespace, "" on error.
+func readTrim(path string) string {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open /dev/fb1: %w", err)
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
+	fbPath, err := panelFramebuffer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to locate panel framebuffer: %w", err)
+	}
+	log.Printf("UI rendering to panel framebuffer %s", fbPath)
+
+	fbFile, err := os.OpenFile(fbPath, os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open %s: %w", fbPath, err)
 	}
 
 	// Memory map the framebuffer (320x240, 16-bit color = 153600 bytes)
-	fbSize := 320 * 240 * 2
+	fbSize := panelWidth * panelHeight * 2
 	mmap, err := unix.Mmap(int(fbFile.Fd()), 0, fbSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
 		fbFile.Close()
@@ -81,7 +150,7 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 		lib:    lib,
 		fbFile: fbFile,
 		mmap:   mmap,
-		canvas: image.NewRGBA(image.Rect(0, 0, 320, 240)),
+		canvas: image.NewRGBA(image.Rect(0, 0, panelWidth, panelHeight)),
 	}
 
 	go r.listen()
@@ -107,7 +176,7 @@ func (r *Renderer) pollWiFi() {
 		if err == nil && len(data) > 0 && data[0] == '1' {
 			connected = true
 		}
-		
+
 		r.mu.Lock()
 		changed := r.wifiConnected != connected
 		r.wifiConnected = connected
