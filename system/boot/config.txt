@@ -32,8 +32,12 @@ arm_boost=1
 # boot. Audio is validated first; display/backlight/KMS stay commented until each
 # is proven to boot on its own.
 
-# MAX98357A I2S DAC/amp — snd-soc-max98357a + simple-audio-card (both in-kernel)
-dtoverlay=max98357a
+# MAX98357A I2S DAC/amp — snd-soc-max98357a + simple-audio-card (both in-kernel).
+# sdmode-pin=26: the amp's SD/enable is wired to GPIO26 (phys 37) on this build
+# (High=awake, Low=mute). The overlay's default sdmode-pin is GPIO4 — which on this
+# build is the rotary encoder's A line, so the default would drive an input pin and
+# fight the encoder. Pinning it to 26 both enables the amp and frees GPIO4.
+dtoverlay=max98357a,sdmode-pin=26
 
 # Display HAT Mini ST7789V (SPI) + KMS — DISABLED until validated after audio:
 #dtoverlay=vc4-kms-v3d
