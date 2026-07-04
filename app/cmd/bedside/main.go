@@ -27,27 +27,17 @@ func main() {
 	}
 	defer lib.Close()
 
-	// 3. Start the UI Renderer
-	gui, err := ui.New(eventBus, lib)
-	if err != nil {
-		log.Fatalf("Failed to initialize UI: %v", err)
-	}
-	defer gui.Close()
-
-	// 4. Start the Input Manager (Buttons)
-	_, err = input.New(eventBus)
-	if err != nil {
-		log.Printf("Warning: Input manager failed to initialize: %v", err)
-	}
-
-	// 5. Start the Audio Player (mpv)
+	// 3. Start the audio player and resume playback FIRST — before the SPI panel
+	// framebuffer, which probes ~20s into boot. Decoupling audio from the display
+	// lets a resumed book start playing as soon as the ALSA card is ready, instead
+	// of waiting on the (late) panel to open.
 	mpv, err := player.New(eventBus, lib)
 	if err != nil {
 		log.Fatalf("Failed to start player: %v", err)
 	}
 	defer mpv.Close()
 
-	// Resume System State!
+	// Resume saved playback state.
 	sysState, err := lib.GetSystemState()
 	if err == nil && sysState.ActiveFile != "" {
 		log.Printf("Resuming state: %s (Playing: %v, Timeout: %dm)", sysState.ActiveFile, sysState.Playing, sysState.Timeout)
@@ -59,9 +49,25 @@ func main() {
 		log.Println("No saved system state, idling.")
 	}
 
-	// 6. Start the App Controller
+	// 4. Start the UI renderer. Opening the panel framebuffer blocks until the
+	// ST7789 has probed over SPI, so this comes up after audio is already going.
+	gui, err := ui.New(eventBus, lib)
+	if err != nil {
+		log.Fatalf("Failed to initialize UI: %v", err)
+	}
+	defer gui.Close()
+
+	// 5. Start the Input Manager (buttons + encoder).
+	if _, err := input.New(eventBus); err != nil {
+		log.Printf("Warning: Input manager failed to initialize: %v", err)
+	}
+
+	// 6. Start the App Controller, then push the current player state so the
+	// just-attached UI renders the resumed book immediately (it wasn't subscribed
+	// yet when the resume above fired its state event).
 	app := NewApp(eventBus, lib, gui, mpv, sysState)
 	go app.Run()
+	eventBus.Publish(bus.EventPlayerStateChanged, mpv.State)
 
 	// 7. Watch the audiobook directory and (re)scan on changes — event-driven,
 	// not polling. Runs an initial scan, then debounced rescans on uploads.

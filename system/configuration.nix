@@ -181,11 +181,6 @@ in
     };
     # Use DHCP on wlan0 once connected
     interfaces.wlan0.useDHCP = true;
-    # Don't let DHCP gate boot: dhcpcd forks to the background immediately so
-    # multi-user.target (and sshd) come up ~9s sooner. The appliance plays local
-    # files and needs no network to start; Wi-Fi finishes associating in the
-    # background.
-    dhcpcd.wait = "background";
   };
 
   services = {
