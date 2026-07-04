@@ -1,22 +1,23 @@
 # Bedside Audiobook Appliance
 
 **Architecture, BOM, and Build Plan**
-_Go + Datastar + Pi Zero 2 W + Display HAT Mini + MAX98357A + CE32A-4 (mono)_
+_Go (native framebuffer) + NixOS + Pi Zero 2 W + Display HAT Mini + MAX98357A + CE32A-4 (mono)_
 
 ---
 
 ## 0. Decisions locked
 
-**This is the Tier 2 lean build.** Earlier revisions of this doc went chasing premium components — Pi 4, 5" Touch Display, stereo speakers, DS3231 RTC, MiniAmp DAC HAT — most of which weren't earning their cost for a bedside spoken-word player. This rev strips back to the minimum that delivers the experience: standalone bedside operation, screen for clock + browsing + now-playing, audio that fills a quiet bedroom.
+**This is the Tier 2 lean build.** Earlier revisions of this doc went chasing premium components — Pi 4, 5" Touch Display, stereo speakers, DS3231 RTC, MiniAmp DAC HAT — most of which weren't earning their cost for a bedside spoken-word player. This rev strips back to the minimum that delivers the experience: standalone bedside operation, a screen for browsing + now-playing (a clock display is planned, not yet built), audio that fills a quiet bedroom.
 
 | Axis         | Choice                                                                     | Why it matters downstream                                                                                                                                                                 |
 | ------------ | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SBC          | **Raspberry Pi Zero 2 W**                                                  | $15 board, fanless idle, fits the smallest enclosure. Cog + Go + Datastar runs comfortably; we're not Chromium-bound anymore.                                                             |
+| SBC          | **Raspberry Pi Zero 2 W**                                                  | $15 board, fanless idle, fits the smallest enclosure. A single Go binary drawing straight to the panel framebuffer sips RAM; there is no browser to fit into 512MB.                        |
 | Display      | **Pimoroni Display HAT Mini** (2.0" IPS SPI + 4 onboard buttons + RGB LED) | Stacks directly on the Pi header. Replaces the separate display + buttons + bezel work. Software-controllable backlight to true zero.                                                     |
 | Audio        | **Adafruit MAX98357A + 1× Dayton CE32A-4** (mono)                          | $6 I2S amp breakout instead of a $32 HAT. Single 1.25" 4Ω driver. Mono for spoken word is fine — at this driver size and bedside distance you wouldn't perceive much stereo image anyway. |
 | Clock source | NTP only (no DS3231 RTC)                                                   | Saves $20 + I2C wiring. Accept that the clock reads briefly wrong after a power-loss-plus-wifi-down event. Easy to add later as a $3 breakout.                                            |
-| Sync         | Standalone / Offline-first                                                 | Completely decoupled from Audiobookshelf. Audiobooks are loaded via Samba (SMB) share over Wi-Fi onto local storage.                                                                      |
-| **Renderer** | **Cog (WebKitGTK) on KMS/DRM** — no Xorg, no Chromium                      | ~150MB resident vs Chromium's ~400MB. Boots 4–6s faster. Datastar unchanged.                                                                                                              |
+| Sync         | Standalone / Offline-first                                                 | Completely decoupled from Audiobookshelf. Audiobooks currently reach local storage by manual copy (e.g. `scp`/`rsync` over SSH); a Samba (SMB) share for drag-and-drop transfers is planned, not configured today.                       |
+| **Renderer** | **Native Go → SPI panel framebuffer** — no browser, no Xorg, no HTTP       | The Go binary `mmap`s `/dev/fbN` and draws the 320×240 RGB565 panel directly with `image/draw` + `basicfont`. Tens of MB resident, boots in seconds.                                      |
+| **OS**       | **NixOS (declarative SD image)**                                            | Whole device — kernel, DT overlays, the `bedside` service, Wi-Fi — is one reproducible config. Build a signed SD image, then push incremental changes over SSH with colmena.              |
 
 **Estimated total delivered cost: ~$135** (~$77 unique-to-this-build parts).
 
@@ -24,9 +25,9 @@ _Go + Datastar + Pi Zero 2 W + Display HAT Mini + MAX98357A + CE32A-4 (mono)_
 
 ## 1. Architecture
 
-Single Go binary on the Pi. It owns audio playback, GPIO input, backlight, the library scanner, position state, and HTTP/SSE to a kiosk WebKit (Cog) pointed at localhost. Datastar drives the UI: server-rendered HTML, attribute-driven interactivity, and SSE for everything that changes over time. There is no client-side state framework — no React, no htmx-plus-Alpine. Datastar attributes hang off the same DOM the server rendered.
+Single Go binary on the Pi. It owns audio playback, GPIO input, backlight, the library scanner, position/system state, and — crucially — it draws the screen itself. There is no web stack: no HTTP server, no HTML, no browser. The binary `mmap`s the SPI panel's framebuffer and paints pixels into it with the Go standard library's `image`/`image/draw` and `golang.org/x/image/font/basicfont`. Everything inside the process is coordinated through an in-process, typed event bus built on channels.
 
-**Renderer:** [Cog](https://github.com/Igalia/cog) (Igalia's WebKit kiosk shell) on top of [WebKitGTK](https://webkitgtk.org/), rendered directly to KMS/DRM with no Xorg. This is intentionally not Chromium: a single-tab kiosk is exactly what Cog was built for, the resident memory is roughly a third, and skipping Xorg removes a whole boot-time stratum.
+**Renderer:** the `ui` package discovers the panel's `/dev/fbN` by sysfs metadata, `mmap`s it, and renders a `320×240` RGBA canvas that it packs into 16-bit RGB565 and copies into the mmap on every state change. The panel is an ST7789 driven by the kernel `panel-mipi-dbi` driver; the app talks to its DRM framebuffer node, not to any windowing system. There is no Xorg, no Wayland, no compositor — the render loop is a goroutine reacting to bus events plus a Wi-Fi status poller. `main.go` logs this on startup: "Starting Bedside Audiobook Appliance (Native Framebuffer Mode)".
 
 ### 1.1 Component map
 
@@ -34,17 +35,17 @@ Components within the Go binary, all coordinated through an in-process event bus
 
 | Component       | Responsibility                                                                                               | Inputs                  | Outputs                            |
 | --------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------- | ---------------------------------- |
-| **Player**      | mpv IPC client; play/pause/seek/volume; emits position ticks at 1Hz                                          | Commands from event bus | PlaybackState events               |
-| **Library**     | Local filesystem scanner using `ffprobe` (via `ffmpeg`) to extract metadata, chapters, and cover art         | Local audio files       | Library DB updates, cover blobs    |
-| **Media Loader**| Samba (SMB) share runs on Wi-Fi connection to allow easy drag-and-drop file transfers from any OS            | SMB over Wi-Fi          | File writes to local storage       |
-| **Input**       | GPIO: rotary encoder (quadrature decode), HAT buttons (debounced); push events to bus                        | periph.io GPIO          | InputEvent (rotate, click, button) |
-| **Display**     | Backlight PWM via /sys/class/backlight; modes: full / dim / off-but-clock / fully-off; wake-on-button        | InputEvent, idle timer  | BacklightState events              |
-| **Sleep timer** | Countdown + fade-out + pause; SSE-driven progress to UI                                                      | Timer commands, Player  | TimerTick events, Player commands  |
-| **Web**         | HTTP routes, templ-rendered HTML, Datastar SSE endpoint, action handlers                                     | All bus events          | HTML to Chromium                   |
+| **Player**      | mpv JSON-IPC client over a unix socket; play/pause/seek/volume/skip-chapter; emits progress ticks            | Commands from event bus | PlaybackState events               |
+| **Library**     | Local filesystem scanner using `ffprobe` to extract metadata and chapters into bbolt                         | Local audio files       | bbolt catalog updates              |
+| **Input**       | GPIO polling: rotary encoder (quadrature decode), HAT buttons (debounced); publishes input events            | periph.io GPIO          | InputEvent (rotate, click, button) |
+| **Display**     | Backlight on/off via `/sys/class/backlight` if present, else BCM GPIO13 sysfs; wake/blank on input + timer   | InputEvent, screen timer| Backlight state                    |
+| **Renderer/UI** | `mmap`s the panel framebuffer; draws player + library-menu screens with `image/draw` + `basicfont`; RGB565   | All bus events          | Pixels in `/dev/fbN` (the panel)   |
 
-### 1.2 Event flow (state to browser)
+There is no in-binary "media loader" component today: audiobooks reach `/var/lib/bedside/audiobooks/` by manual copy (e.g. `scp`/`rsync` over SSH). A Samba (SMB) share for drag-and-drop transfers from any OS is a planned convenience, not implemented.
 
-State flows one direction: hardware/timers → event bus → SSE merge fragments → DOM. UI actions flow back via Datastar `data-on-*` attributes hitting POST endpoints that emit bus commands.
+### 1.2 Event flow (state → event bus → framebuffer)
+
+State flows one direction: hardware/timers → event bus → the renderer repaints the framebuffer. Input flows the other way: GPIO watchers publish events onto the same bus, and the App controller turns them into player/menu commands. Nothing leaves the process — there is no socket to the UI, because the UI *is* a goroutine in the same binary.
 
 ```
             ┌──────────────┐      ┌─────────────────┐
@@ -61,41 +62,33 @@ GPIO ----> │  Input       │─┐    │  Local Storage  │
                 ┌───────────────┘       └────────────────┐
                 v                                        v
         ┌──────────────┐                          ┌──────────────┐
-        │   Player     │── mpv IPC --> libmpv --> │  MAX98357A   │
-        │              │                          │  I2S breakout│
+        │   Player     │── mpv JSON IPC --> mpv ->│  MAX98357A   │
+        │              │   (unix socket)          │  I2S breakout│
         └──────────────┘                          └──────┬───────┘
-                │                                        │ I2S
-                v                                        v
-        ┌──────────────┐                          ┌──────────────┐
-        │   Web/SSE    │── merge-fragments ----->│  Cog kiosk   │
-        │   (Datastar) │   merge-signals          │  (WebKitGTK  │
-        │              │                          │   on KMS/DRM)│
+                                                         │ I2S
+                                                         v
+        ┌──────────────┐   copyToRGB565           ┌──────────────┐
+        │  Renderer/UI │── (mmap write) --------->│  ST7789 panel│
+        │  image/draw  │                          │  /dev/fbN    │
+        │  basicfont   │                          │  (SPI, 320×  │
+        │              │                          │   240 RGB565)│
         └──────────────┘                          └──────────────┘
 ```
 
-### 1.3 Why Datastar fits this
+### 1.3 Why native framebuffer (no browser)
 
-- **Hypermedia stays the source of truth.** The Pi is bandwidth-rich (localhost) and the screen is small. Server-rendered fragments cost nothing and keep all state in Go.
-- **SSE is the right transport for a player.** Position, chapter changes, sleep-timer countdown, and clock all push from the server. No polling, no WebSocket framing.
-- **`data-on-click` to POST** keeps button handlers trivial. The server emits a bus command and pushes a fragment back over SSE — the click endpoint can return 204.
-- **No SPA** means no `npm`, no bundler, no source maps to debug at 2am when the device hangs.
+- **Nothing to fit into 512MB.** The whole reason earlier revisions agonized over renderer choice was that a browser is the heaviest thing on the device. Delete the browser and the problem evaporates: a Go binary that `mmap`s the framebuffer costs tens of MB, not hundreds.
+- **The screen is 320×240.** At this size there is no layout engine worth carrying. `image/draw` fills rectangles and `basicfont.Face7x13` stamps text; that is the entire UI toolkit we need.
+- **One process, one language, one failure domain.** No HTTP server to bind, no event stream to reconnect, no localhost round-trip, no `npm`/bundler/source-maps to debug at 2am. State lives in Go structs; the render function reads them and paints.
+- **Boot is trivial.** There is no second process to sequence after the Go binary — no browser to launch, no `network-online` gate for a local socket. `systemd` starts one unit and the screen lights up.
 
-### 1.4 Renderer choice: why Cog/WebKitGTK over Chromium
+### 1.4 Render pipeline
 
-Chromium is the heaviest single thing on this device. For a one-tab, one-origin kiosk that never browses the open web, almost every Chromium feature is dead weight: tab management, the multi-process sandbox tree, the GPU process, the network service process, extensions, sync, OOPIF, V8 isolates beyond one. The cost is ~400MB resident, multi-second startup, and an Xorg dependency.
-
-| Renderer                       | Resident RAM | Boots in | Server-side render?     | Verdict                                |
-| ------------------------------ | ------------ | -------- | ----------------------- | -------------------------------------- |
-| **Cog + WebKitGTK on KMS/DRM** | ~140–180 MB  | ~2–3s    | Yes, Datastar unchanged | **Pick this**                          |
-| Chromium kiosk                 | ~380–450 MB  | ~7–10s   | Yes                     | Original plan; overkill                |
-| Firefox/GeckoView              | ~300 MB      | slower   | Yes                     | No win over WebKit                     |
-| Servo                          | varies       | varies   | Yes                     | Too immature for a daily-use appliance |
-
-Cog is purpose-built for set-top-box / infotainment kiosk use cases by Igalia (the WebKit folks). It runs against a `--platform=drm` backend so we render straight to the framebuffer through KMS — no Xorg, no Wayland compositor required. Datastar is plain HTML+JS; WebKit's JavaScriptCore runs Datastar's tiny client just fine.
+The renderer holds an `image.RGBA` canvas the size of the panel. On each repaint it clears the background, draws the player screen, optionally overlays the library menu, stamps the Wi-Fi icon, then calls `copyToRGB565` to pack the RGBA canvas into the 16-bit little-endian RGB565 layout the panel expects and writes it straight into the `mmap`. Repaints are driven by two goroutines: a bus subscriber that repaints on `PlayerStateChanged` / `PlayerProgressTick` / `MenuUpdate`, and a Wi-Fi poller that reads `/sys/class/net/wlan0/carrier` every 2s and repaints on change. See §6 for the screen layouts and a faithful code sketch.
 
 ### 1.5 Why Pi Zero 2 W is enough
 
-With Chromium gone, the Zero 2 W's 512MB RAM is not the limiting factor it used to be. Idle budget with Cog + Go server + mpv lands around 220–260MB resident. CPU is light for spoken-word playback and Datastar fragment patches; the only thing that would stress this SBC is H.264 video cover decode (some M4B books carry one) — we avoid runtime decoding by extracting a static JPEG of the cover using `ffprobe`/`ffmpeg` during the scan phase.
+With no browser, the Zero 2 W's 512MB RAM stops being the binding constraint. The resident set is the Go binary plus the mpv subprocess — comfortably tens of MB, not hundreds — leaving the rest of RAM free for the page cache and zram swap. CPU is light: spoken-word decode is near-idle, and the renderer only repaints on state changes (a full `320×240` RGB565 frame is 150KB, packed and copied in well under a frame's worth of time). There is no runtime cover-art decode to worry about because we do not render cover art on the panel at all.
 
 **Power**: a Zero 2 W under this load draws roughly 500–800mA at 5V — comfortable on a 2.5A micro-USB PSU with the MAX98357A on the same supply. No PSU oversizing needed.
 
@@ -109,11 +102,11 @@ With Chromium gone, the Zero 2 W's 512MB RAM is not the limiting factor it used 
 
 **Use mpv via JSON IPC, not a Go-native decoder.** This is the controversial pick so I'll defend it. `beep` and `oto` decode in Go and are great for games and effects, but they don't handle: gapless chapter transitions across M4B parts, M4B chapter metadata, accurate seek across VBR MP3, ReplayGain, or buffered HTTP streaming. Reimplementing those is a months-long detour.
 
-mpv handles all of it, runs as a child process, and exposes a stable JSON-over-unix-socket protocol. You connect, send `{"command":["set_property","pause",false]}`, observe properties for `time-pos` and `chapter`, and you're done.
+mpv handles all of it, runs as a child process, and exposes a stable JSON-over-unix-socket protocol. You connect, send `{"command":["set_property","pause",false],"request_id":N}`, observe `time-pos` / `duration` / `volume`, skip chapters with `add chapter ±1`, and you're done. The socket lives at `/var/lib/bedside/mpv.sock`; the player dials it with a short retry loop because mpv re-creates it on start.
 
-| Option                                                    | Verdict        | Notes                                                                                                             |
-| --------------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **mpv + JSON IPC** (Recommended)                          | Use this       | Spawn `mpv --idle --input-ipc-server=/run/abs/mpv.sock --no-video --really-quiet`. Tiny Go client; ~200 lines.    |
+| Option                                                    | Verdict        | Notes                                                                                                                                                             |
+| --------------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **mpv + JSON IPC** (Recommended)                          | Use this       | Spawn `mpv --idle --no-video --really-quiet --no-config --ao=alsa --audio-device=alsa/plughw:CARD=MAX98357A,DEV=0 --input-ipc-server=/var/lib/bedside/mpv.sock`. Tiny Go client. |
 | **libmpv via cgo** (`gen2brain/go-mpv` or write your own) | Acceptable     | Tighter integration, no subprocess. Adds cgo build complexity for marginal gain on a Pi.                          |
 | **beep / oto**                                            | Skip for this  | No M4B chapter handling, no gapless, you'd be writing a player not an appliance.                                  |
 | **MPRIS over D-Bus** (`godbus/dbus`)                      | Optional layer | Nice if you want phone-as-remote later. Add as a thin adapter on top of the Player; not the primary control path. |
@@ -122,55 +115,56 @@ mpv handles all of it, runs as a child process, and exposes a stable JSON-over-u
 
 | Library                                                     | Verdict    | Notes                                                                                                                |
 | ----------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------- |
-| **periph.io/x/conn/v3 + periph.io/x/host/v3** (Recommended) | Use this   | Actively maintained, idiomatic Go, edge-trigger interrupts via gpiocdev backend. Handles encoder quadrature cleanly. |
-| `stianeikeland/go-rpio`                                     | Avoid      | mmaps `/dev/mem`, no edge interrupts, polls. Encoders will skip detents at wake-from-idle.                           |
+| **periph.io/x/conn/v3 + periph.io/x/host/v3** (Recommended) | Use this   | Actively maintained, idiomatic Go, clean pin API via `gpioreg`. This build polls: the encoder A/B pins every 2ms for quadrature, buttons every 5ms with a 50ms debounce. All pins are `PullUp, NoEdge`. |
+| `stianeikeland/go-rpio`                                     | Avoid      | mmaps `/dev/mem` — no reason to reach that low for a few buttons and one encoder.                                    |
 | `warthog618/go-gpiocdev`                                    | Acceptable | Modern character-device API. Lower-level than periph.io. Use directly if you want zero abstraction.                  |
 
 ### 2.3 Local Library Scanner
 
-Instead of an API client, the appliance scans the local directory (`/var/lib/bedside/audiobooks/`) directly. We rely on **`ffprobe`** (part of `ffmpeg`) to handle metadata extraction because it handles M4B chapters correctly, avoiding the need for complex Go tagging libraries.
+Instead of an API client, the appliance scans the local directory (`/var/lib/bedside/audiobooks/`) directly. We rely on **`ffprobe`** (supplied by `ffmpeg-headless` on the service path) to handle metadata extraction because it handles M4B chapters correctly, avoiding the need for complex Go tagging libraries.
 
-A Go goroutine runs periodically or on-demand:
-1. Walks the directory looking for `.m4b`, `.mp3`, `.m4a`.
-2. Runs `ffprobe -v quiet -print_format json -show_format -show_chapters -show_streams /path/to/file` and unmarshals the JSON.
-3. Updates the local `boltdb` library catalog.
-4. Uses `ffmpeg` to extract cover art embedded in the file to `/var/lib/bedside/covers/{fileHash}.jpg`.
+A Go goroutine runs on-demand and again on a 5-minute timer:
+1. Walks the (flat) directory — subdirectories are skipped — looking for `.m4b`, `.mp3`, `.m4a`.
+2. Computes a stable ID = first 12 bytes of the SHA-256 of the base filename, hex-encoded; skips the file if that ID is already in the DB.
+3. Runs `ffprobe -v quiet -print_format json -show_format -show_chapters -show_streams /path/to/file` and unmarshals the JSON (duration, title, artist, and per-chapter id/title/start/end).
+4. Writes the book as JSON into the bbolt `library` bucket.
 
-### 2.4 Datastar Go SDK + templating
+Cover art is reserved but not yet wired: the cover directory is created and `Audiobook.CoverHash` exists as a field, but `probeFile` does not populate it and the panel UI does not render cover images (see §6). Extraction is a future step, not a current one.
 
-Datastar publishes a Go SDK ([github.com/starfederation/datastar](https://github.com/starfederation/datastar)) with helpers for SSE: `MergeFragments`, `MergeSignals`, `RemoveFragments`, `ExecuteScript`. Pair it with [a-h/templ](https://github.com/a-h/templ) for type-safe HTML. templ compiles .templ files to Go, so you get IDE completion and compile-time checks on your hypermedia.
+### 2.4 Rendering, GPIO, and storage libraries
 
-| Layer                 | Library                                                               | Notes                                                 |
-| --------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
-| HTML rendering        | [a-h/templ](https://github.com/a-h/templ)                             | Type-safe components; `templ generate` in your build. |
-| SSE / Datastar        | [starfederation/datastar](https://github.com/starfederation/datastar) | `sse.MergeFragments(w, html)`; handles event framing. |
-| HTTP router           | [go-chi/chi/v5](https://github.com/go-chi/chi)                        | Minimal, idiomatic, plays well with templ handlers.   |
-| Audio                 | [mpv (JSON IPC)](https://mpv.io/manual/stable/#json-ipc)              | Spawn as a subprocess; control via unix socket.       |
-| GPIO                  | [periph.io/x/conn/v3](https://periph.io/)                             | Idiomatic Go, edge interrupts via gpiocdev backend.   |
-| Metadata extraction   | `os/exec` wrapping `ffprobe`                                          | Extract chapters and tags directly from media files.  |
-| Storage               | [go.etcd.io/bbolt](https://github.com/etcd-io/bbolt)                  | Single-file KV; atomic writes survive yanked power.   |
-| Image processing      | [disintegration/imaging](https://github.com/disintegration/imaging)   | Resize cover art to 480px once on download.           |
-| Logging               | [stdlib log/slog](https://pkg.go.dev/log/slog)                        | JSON to journald, structured.                         |
-| Hot reload (dev only) | [air-verse/air](https://github.com/air-verse/air)                     | Don't ship it; dev convenience.                       |
+There is no web-framework layer to pick — the UI is standard-library drawing straight to the framebuffer. What's left is a small, boring dependency set:
+
+| Layer                 | Library                                                               | Notes                                                                                    |
+| --------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Framebuffer drawing   | stdlib `image`, `image/color`, `image/draw`                           | RGBA canvas; `draw.Draw` fills the background and rectangles (progress bar, menu rows).   |
+| Text                  | [golang.org/x/image/font/basicfont](https://pkg.go.dev/golang.org/x/image/font/basicfont) | `basicfont.Face7x13` stamped via a `font.Drawer` (with `x/image/math/fixed`).            |
+| Framebuffer mmap      | [golang.org/x/sys/unix](https://pkg.go.dev/golang.org/x/sys/unix)     | `unix.Mmap` of `/dev/fbN`; `FBIOBLANK` ioctl (`0x4611`) to unblank.                       |
+| Audio                 | [mpv (JSON IPC)](https://mpv.io/manual/stable/#json-ipc)              | Spawn as a subprocess; control via unix socket.                                          |
+| GPIO                  | [periph.io/x/conn/v3](https://periph.io/) + `x/host/v3`               | Idiomatic Go; the app polls the pins (no edge callbacks).                                 |
+| Metadata extraction   | `os/exec` wrapping `ffprobe`                                          | Extract chapters and tags directly from media files.                                     |
+| Storage               | [go.etcd.io/bbolt](https://github.com/etcd-io/bbolt)                  | Single-file KV; atomic writes survive yanked power.                                       |
+| systemd integration   | [coreos/go-systemd/v22 daemon](https://github.com/coreos/go-systemd)  | `sd_notify(READY=1)` and watchdog pings for the `Type=notify` unit.                       |
+| Logging               | [stdlib log](https://pkg.go.dev/log)                                 | Lines to journald.                                                                        |
 
 ### 2.5 Other useful bits
 
-- **Cover art cache**: store JPEGs on disk under `/var/lib/bedside/covers/{fileHash}.jpg`. Use `ffmpeg` to extract the embedded cover art during the library scan. Decode/resize once with `disintegration/imaging` to a 480px square.
-- **Position persistence**: `boltdb` (`go.etcd.io/bbolt`) — single file, no daemon, atomic writes survive yanked power. Bucket: `progress`, key: `fileHash`, value: JSON of `{position, chapterIdx, updatedAt}`. Flush on every SSE tick (1Hz). The `library` bucket also stores the full metadata catalog.
-- **Search**: a simple `strings.Contains` over normalized titles in a goroutine over the `boltdb` library catalog.
+- **bbolt buckets**: three of them — `library` (book catalog, JSON per book), `progress` (position stored as a `%f` string keyed by base filename), and `system` (a single `SystemState` JSON under `system_state`, defaulting timeout=5, volume=50, encoderMode="vol").
+- **Position persistence**: written on progress ticks but **throttled to at most once every 10s** so the SD card isn't hammered; position is reset to 0 only on a true `eof` end-of-file. Survives a power yank because bbolt fsyncs.
+- **Search**: if/when needed, a simple `strings.Contains` over normalized titles walking the `library` bucket — no index required at this catalog size.
 
 ---
 
 ## 3. Bill of materials
 
-**Single lean build.** No more A/B testing across two SBCs — earlier revisions kept a Pi 4 + Touch Display 2 alongside a Zero 2 W + Display HAT Mini for comparison. Once the renderer was switched to Cog there was no reason to spend Pi 4 money, so we're committing to the smaller, cheaper path. Total delivered cost lands around **$135**, with about **$77** of that being unique-to-this-build parts (the rest are PSU/SD/jumpers/case that you might already own).
+**Single lean build.** No more A/B testing across two SBCs — earlier revisions kept a Pi 4 + Touch Display 2 alongside a Zero 2 W + Display HAT Mini for comparison. Once the renderer became a native framebuffer draw (no browser) there was no reason to spend Pi 4 money, so we're committing to the smaller, cheaper path. Total delivered cost lands around **$135**, with about **$77** of that being unique-to-this-build parts (the rest are PSU/SD/jumpers/case that you might already own).
 
 ### 3.1 Compute
 
 | Item    | Part                                                                                                                   | Supplier  | Qty | Delivered | Notes                                                                                                                                    |
 | ------- | ---------------------------------------------------------------------------------------------------------------------- | --------- | --- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | SBC     | [Raspberry Pi Zero 2 W (with headers pre-soldered)](https://www.pishop.us/product/raspberry-pi-zero-2-wh/)             | PiShop.us | 1   | ~$24      | Pre-soldered headers ($3 premium, worth it). Headerless is $15 + soldering 40 pins.                                                      |
-| microSD | [SanDisk High Endurance 32GB](https://www.amazon.com/SanDisk-Endurance-microSDXC-Adapter-Monitoring/dp/B07P3D6Y5B)     | Amazon    | 1   | ~$10      | Endurance class matters because we'll write position state ~once/sec. 32GB is plenty — Pi OS Lite + Go binary + cover-art cache is <2GB. |
+| microSD | [SanDisk High Endurance 32GB](https://www.amazon.com/SanDisk-Endurance-microSDXC-Adapter-Monitoring/dp/B07P3D6Y5B)     | Amazon    | 1   | ~$10      | Endurance class matters because we'll write position state ~once/sec. 32GB is plenty — the NixOS root (Nix store + Go binary) is comfortably <2GB, leaving the rest for the audiobook library. |
 | PSU     | [CanaKit 2.5A micro-USB PSU (UL listed)](https://www.amazon.com/CanaKit-Raspberry-Supply-Adapter-Listed/dp/B00MARDJZ4) | Amazon    | 1   | ~$10      | Zero 2 W uses micro-USB power, not USB-C. 2.5A absorbs MAX98357A current transients comfortably.                                         |
 | Case    | [Basic Pi Zero 2 W plastic case](https://www.amazon.com/s?k=raspberry+pi+zero+2+w+case)                                | Amazon    | 1   | ~$6       | Generic two-piece snap case. We're not heatsinking — idle thermals are fine in a closed plastic shell.                                   |
 
@@ -184,7 +178,7 @@ Datastar publishes a Go SDK ([github.com/starfederation/datastar](https://github
 
 | Item             | Part                                                                                                                                   | Supplier      | Qty | Delivered | Notes                                                                                                                                            |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| I2S amp breakout | [**Adafruit MAX98357A** I2S Class-D Mono Amp](https://www.adafruit.com/product/3006)                                                   | Adafruit      | 1   | ~$13      | $6 + ~$7 USPS. 3W mono at 4Ω from a tiny breakout. Talks I2S to GPIO 18/19/21. Compatible with the standard `hifiberry-dac` device-tree overlay. |
+| I2S amp breakout | [**Adafruit MAX98357A** I2S Class-D Mono Amp](https://www.adafruit.com/product/3006)                                                   | Adafruit      | 1   | ~$13      | $6 + ~$7 USPS. 3W mono at 4Ω from a tiny breakout. Talks I2S to GPIO 18/19/21. Driven by the `dtoverlay=max98357a,sdmode-pin=26` overlay (kernel `snd-soc-max98357a` + `simple-audio-card`). |
 | Speaker driver   | [**Dayton Audio CE32A-4** 1.25" Mini Speaker, 4Ω](https://www.parts-express.com/Dayton-Audio-CE32A-4-1-1-4-Mini-Speaker-4-Ohm-285-103) | Parts Express | 1   | ~$15      | Single driver, mono. Laptop-scale full-range. $5 driver + $9.95 PE flat ground. Living with mono first; add a second later if you miss stereo.   |
 
 ### 3.4 Controls
@@ -194,7 +188,7 @@ Datastar publishes a Go SDK ([github.com/starfederation/datastar](https://github
 | Rotary encoder + push | [Generic EC11 24-detent encoder w/ pushbutton](https://www.amazon.com/s?k=ec11+rotary+encoder+with+push+button) | Amazon (5-pack) | 1   | ~$8 for 5 | Generic EC11 from a multipack is fine for a one-off build; same form factor and same connections as the Bourns PEC11R.                                                          |
 | Encoder knob          | [Aluminum 20mm D-shaft or round-shaft knob](https://www.amazon.com/s?k=aluminum+knob+20mm+6mm)                  | Amazon          | 1   | ~$5       | Any aluminum knob that fits a 6mm shaft. Adafruit #5527 ($3 + Adafruit shipping = ~$13) is the pretty option; a 4-pack on Amazon is $5 if you can live with anonymous aluminum. |
 
-**HAT buttons replace the discrete button bank.** Map them in software: A=Play/Pause, B=Back, X=Skip-30, Y=Skip+30. The rotary encoder handles scrolling the library list and adjusting volume.
+**HAT buttons replace the discrete button bank.** Map them in software: A=Play/Pause, B=Menu, X=Previous chapter, Y=Next chapter. The rotary encoder handles scrolling the library list and adjusting volume.
 
 ### 3.5 Wiring & enclosure
 
@@ -233,15 +227,15 @@ Two HATs cohabit cleanly: the Display HAT Mini (SPI + button pins) and the MAX98
 
 | BCM               | Phys | Used by                                     | Notes                                                                    |
 | ----------------- | ---- | ------------------------------------------- | ------------------------------------------------------------------------ |
-| GPIO4             | 7    | **Rotary encoder A**                        | Free GPIO; edge-triggered.                                               |
+| GPIO4             | 7    | **Rotary encoder A**                        | Free GPIO; polled (no edge interrupts).                                  |
 | GPIO5             | 29   | **Display HAT Mini: Button A**              | Map to Play/Pause.                                                       |
-| GPIO6             | 31   | **Display HAT Mini: Button B**              | Map to Back.                                                             |
-| GPIO8 (CE0)       | 24   | **Display HAT Mini: SPI CE0**               | ST7789 chip-select.                                                      |
+| GPIO6             | 31   | **Display HAT Mini: Button B**              | Map to Menu.                                                             |
+| GPIO7 (CE1)       | 26   | **Display HAT Mini: SPI CE1**               | ST7789 chip-select (`dtoverlay=mipi-dbi-spi,spi0-1`).                    |
 | GPIO9 (MISO)      | 21   | **Display HAT Mini: DC**                    | Repurposed as data/command.                                              |
 | GPIO10 (MOSI)     | 19   | **Display HAT Mini: SPI MOSI**              |                                                                          |
 | GPIO11 (SCLK)     | 23   | **Display HAT Mini: SPI clock**             |                                                                          |
-| GPIO13            | 33   | **Display HAT Mini: backlight PWM**         | Hardware PWM channel.                                                    |
-| GPIO16            | 36   | **Display HAT Mini: Button X**              | Map to Skip-30.                                                          |
+| GPIO13            | 33   | **Display HAT Mini: backlight enable**      | On/off via sysfs (no PWM); see §4.4.                                     |
+| GPIO16            | 36   | **Display HAT Mini: Button X**              | Map to previous chapter.                                                 |
 | GPIO17            | 11   | **Display HAT Mini: RGB LED**               | Multi-channel LED via PWM on shared pins.                                |
 | GPIO18 (PCM_CLK)  | 12   | **MAX98357A: BCLK**                         | I2S bit clock.                                                           |
 | GPIO19 (PCM_FS)   | 35   | **MAX98357A: LRC**                          | I2S word select.                                                         |
@@ -249,7 +243,7 @@ Two HATs cohabit cleanly: the Display HAT Mini (SPI + button pins) and the MAX98
 | GPIO21 (PCM_DOUT) | 40   | **MAX98357A: DIN**                          | I2S data.                                                                |
 | GPIO22            | 15   | **Display HAT Mini: RGB LED**               | Multi-channel LED via PWM on shared pins.                                |
 | GPIO23            | 16   | **Rotary encoder push**                     | Free GPIO.                                                               |
-| GPIO24            | 18   | **Display HAT Mini: Button Y**              | Map to Skip+30.                                                          |
+| GPIO24            | 18   | **Display HAT Mini: Button Y**              | Map to next chapter.                                                     |
 | GPIO25            | 22   | **Display HAT Mini: Reset**                 | ST7789 reset line.                                                       |
 | GND               | 25   | **Display HAT Mini: SPI Ground**            | **CRITICAL** for 60MHz SPI return path; must connect.                    |
 | GPIO26            | 37   | **MAX98357A: SD / SD_MODE**                 | Hardware Mute (Low = Mute, High = Awake). Eliminates I2S pops.           |
@@ -317,93 +311,104 @@ Internal pull-ups via periph.io are sufficient for both encoder and HAT buttons.
 
 Display HAT Mini buttons (built-in, no wiring):
   Button A (GPIO5)  --> software: Play/Pause
-  Button B (GPIO6)  --> software: Back / Menu
-  Button X (GPIO16) --> software: Skip -30s
-  Button Y (GPIO24) --> software: Skip +30s
+  Button B (GPIO6)  --> software: Menu
+  Button X (GPIO16) --> software: Previous chapter
+  Button Y (GPIO24) --> software: Next chapter
 
-### 4.3 /boot/firmware/config.txt
+### 4.3 Firmware config.txt (device tree)
 
-The complete and optimized configuration is stored in the repository at [boot/config.txt](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/boot/config.txt).
+The RPi firmware assembles the device tree from `config.txt` plus the `overlays/` directory on the FAT partition (see §5.1). The complete, appliance-tuned config is stored in the repository at [system/boot/config.txt](file:///Users/jadams/code/github/jasonkradams/bedside-reader/system/boot/config.txt). Key lines: `dtparam=spi=on` / `dtparam=i2s=on` / `dtparam=audio=off`; the MAX98357A overlay `dtoverlay=max98357a,sdmode-pin=26`; and the panel overlay `dtoverlay=mipi-dbi-spi,spi0-1,speed=60000000` with `dtparam=width=320,height=240` and `dtparam=dc-gpio=9`.
 
 
 ### 4.4 Backlight control from Go
 
-The Display HAT Mini's backlight is a PWM line on GPIO13. The `mipi-dbi-spi` overlay exposes it through `/sys/class/backlight/.../brightness` — same interface we'd have used on the Touch Display 2. Write 0 for true off.
+Backlight is a simple on/off, not a PWM duty. `display.SetBacklight(bool)` tries two paths in order. **First** it globs `/sys/class/backlight/*/brightness` and, if a backlight class device exists, writes `"1"`/`"0"` to it — the driver may name it `spi0.1`, `10-0045`, etc., so we glob rather than hardcode. **On this build there is no backlight class device**, so it falls through to the **fallback**: driving BCM **GPIO13** by raw sysfs. Because the sysfs GPIO number is `gpiochip_base + 13`, it reads the base from `/sys/class/gpio/gpiochip*/base` (defaulting to literal `13`), exports the line if needed, sets `direction=out`, then writes `value`.
 
 ```go
-// internal/display/backlight.go
+// internal/display/backlight.go (abbreviated)
 package display
 
-import (
-    "fmt"
-    "os"
-)
+func SetBacklight(on bool) {
+    val := "0"
+    if on {
+        val = "1"
+    }
 
-const (
-    // The exact path is determined by the SPI bus the HAT enumerates on.
-    // Check after first boot: ls /sys/class/backlight/
-    brightnessPath    = "/sys/class/backlight/spi0.0/brightness"
-    maxBrightnessPath = "/sys/class/backlight/spi0.0/max_brightness"
-)
+    // Preferred: a backlight class device, if the panel driver exposed one.
+    matches, err := filepath.Glob("/sys/class/backlight/*/brightness")
+    if err == nil && len(matches) > 0 {
+        os.WriteFile(matches[0], []byte(val), 0644)
+        return
+    }
 
-type Backlight struct{ max int }
-
-func NewBacklight() (*Backlight, error) {
-    data, err := os.ReadFile(maxBrightnessPath)
-    if err != nil { return nil, err }
-    var max int
-    fmt.Sscanf(string(data), "%d", &max)
-    return &Backlight{max: max}, nil
-}
-
-// Set duty 0.0 (fully off, true zero) to 1.0 (full on).
-func (b *Backlight) Set(duty float64) error {
-    if duty < 0 { duty = 0 }
-    if duty > 1 { duty = 1 }
-    val := int(float64(b.max) * duty)
-    return os.WriteFile(brightnessPath, []byte(fmt.Sprint(val)), 0644)
+    // Fallback (the real path on this build): raw sysfs BCM GPIO13.
+    gpioNum := "13"
+    if m, err := filepath.Glob("/sys/class/gpio/gpiochip*/base"); err == nil && len(m) > 0 {
+        if content, err := os.ReadFile(m[0]); err == nil {
+            if base, err := strconv.Atoi(strings.TrimSpace(string(content))); err == nil {
+                gpioNum = strconv.Itoa(base + 13)
+            }
+        }
+    }
+    gpioPath := "/sys/class/gpio/gpio" + gpioNum
+    if _, err := os.Stat(gpioPath); os.IsNotExist(err) {
+        os.WriteFile("/sys/class/gpio/export", []byte(gpioNum), 0200)
+    }
+    os.WriteFile(gpioPath+"/direction", []byte("out"), 0644)
+    os.WriteFile(gpioPath+"/value", []byte(val), 0644)
 }
 ```
 
-Grant the bedside user write access without root via udev. The configuration file is stored in the repository at [udev/90-backlight.rules](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/udev/90-backlight.rules).
+Non-root access is granted declaratively in NixOS, not via a standalone udev file: a udev rule and the `bedside` service's `SupplementaryGroups`/`ExecStartPre` (which exports and chowns the GPIO line to the `gpio` group) are all defined in [system/configuration.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/system/configuration.nix).
 
 
 ### 4.5 HAT buttons + encoder in Go
 
-All inputs are read identically through periph.io. The Display HAT Mini buttons are just GPIOs to ground — no library lock-in to Pimoroni's Python stack.
+All inputs are read identically through periph.io. The Display HAT Mini buttons are just GPIOs to ground — no library lock-in to Pimoroni's Python stack. The encoder is on **GPIO4 (A) / GPIO20 (B) / GPIO23 (push)** — not 17/22, which the RGB-LED lines use. Every pin is configured `PullUp, NoEdge`; the app **polls** rather than using edge interrupts (encoder A/B every 2ms, buttons every 5ms with a 50ms debounce).
 
 ```go
-// internal/input/handlers.go (abbreviated)
+// internal/input/input.go (abbreviated)
 package input
 
 import (
+    "time"
+
     "periph.io/x/conn/v3/gpio"
     "periph.io/x/conn/v3/gpio/gpioreg"
 )
 
-type Pins struct {
-    BtnA, BtnB, BtnX, BtnY gpio.PinIO  // GPIO 5, 6, 16, 24
-    EncA, EncB, EncSW      gpio.PinIO  // GPIO 17, 22, 23
+// HAT buttons A/B/X/Y = GPIO5/6/16/24; rotary encoder A/B/push = GPIO4/20/23.
+func setup() {
+    for _, name := range []string{
+        "GPIO5", "GPIO6", "GPIO16", "GPIO24", // buttons
+        "GPIO4", "GPIO20", "GPIO23", // encoder A, B, push
+    } {
+        pin := gpioreg.ByName(name)
+        if pin == nil {
+            continue // partially-connected HAT still works
+        }
+        pin.In(gpio.PullUp, gpio.NoEdge)
+    }
 }
 
-func Open() (*Pins, error) {
-    p := &Pins{
-        BtnA:  gpioreg.ByName("GPIO5"),
-        BtnB:  gpioreg.ByName("GPIO6"),
-        BtnX:  gpioreg.ByName("GPIO16"),
-        BtnY:  gpioreg.ByName("GPIO24"),
-        EncA:  gpioreg.ByName("GPIO17"),
-        EncB:  gpioreg.ByName("GPIO22"),
-        EncSW: gpioreg.ByName("GPIO23"),
-    }
-    for _, pin := range []gpio.PinIO{
-        p.BtnA, p.BtnB, p.BtnX, p.BtnY, p.EncA, p.EncB, p.EncSW,
-    } {
-        if err := pin.In(gpio.PullUp, gpio.BothEdges); err != nil {
-            return nil, err
+// watchEncoder polls A/B; a falling edge on A with B high is clockwise (+1),
+// otherwise counter-clockwise (-1).
+func watchEncoder(pinA, pinB gpio.PinIO, emit func(delta int)) {
+    lastA := pinA.Read()
+    for {
+        time.Sleep(2 * time.Millisecond)
+        a, b := pinA.Read(), pinB.Read()
+        if a != lastA {
+            if a == gpio.Low && lastA == gpio.High {
+                if b == gpio.High {
+                    emit(1) // CW
+                } else {
+                    emit(-1) // CCW
+                }
+            }
+            lastA = a
         }
     }
-    return p, nil
 }
 ```
 
@@ -411,252 +416,202 @@ func Open() (*Pins, error) {
 
 ## 5. Software setup
 
-### 5.1 OS image
+### 5.1 OS image (declarative NixOS)
 
-- Pi OS Lite (Bookworm, 64-bit). No desktop, no Xorg, no Wayland compositor.
-- First boot: SSH enabled via `userconf.txt`, hostname `bedside`, fixed wifi creds via NetworkManager.
-- **Read-only root + tmpfs overlay** for `/var/log` and Cog's WebKit cache. Use `overlayroot` (Debian) or hand-roll with `overlayfs` in initramfs. Position DB on a separate writable partition mounted noatime.
-- **Optimized Kernel Command Line**: The optimized `/boot/firmware/cmdline.txt` configuration is stored in the repository at [boot/cmdline.txt](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/boot/cmdline.txt). It contains parameters (`quiet splash loglevel=3 logo.nologo`) to suppress system diagnostics and logos for a silent, appliance-like boot.
-- **Boot Partition Cleanup**: To optimize disk space and remove clutter on a Pi Zero 2 W, delete redundant boot firmware and device trees for other architectures (e.g., `kernel_2712.img`, `initramfs_2712`, `start4*.elf`, `fixup4*.dat`, and unused `.dtb` files).
-- **Automated Provisioning (cloud-init)**: The customized `/boot/firmware/user-data` configuration is stored in the repository at [boot/user-data](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/boot/user-data). It automates the installation of required packages, creates the `bedside` system user and groups, writes udev rules and systemd service files, and automatically starts services on first boot.
+The OS is **NixOS**, not Raspberry Pi OS — the entire device is one declarative configuration. There is no `apt`, no `cloud-init`, no `userconf.txt`, no hand-written service files: kernel modules, DT overlays, the `bedside` service, users/groups, udev rules, and Wi-Fi are all expressed in Nix and built into a reproducible SD image.
+
+- **Board / OS**: `aarch64-linux`, NixOS `stateVersion = "24.05"`, board module `raspberry-pi-3` (the Pi Zero 2 W is a BCM2837). Defined by `nixosConfigurations.bedside-reader` in [flake.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/flake.nix), importing the upstream `sd-image-aarch64.nix` module plus [system/configuration.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/system/configuration.nix) and [system/sd-image-opts.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/system/sd-image-opts.nix).
+- **Firmware partition owns the device tree.** `useGenerationDeviceTree = false`; U-Boot ignores the NixOS FDTDIR, so `hardware.deviceTree.overlays` would never reach the kernel. Instead the RPi firmware assembles the DT from `config.txt` + `overlays/` on the FAT partition. `sd-image-opts.nix` appends `system/boot/config.txt` to the image's `firmware/config.txt`, copies `panel.bin`, and copies `${kernel}/dtbs/overlays` → `firmware/overlays`. The FAT partition is named **`BEDSIDEBOOT`** and `expandOnBoot = true` grows the root partition on first boot.
+- **Build the image** with the `build-os` target (see [nix/packages.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/nix/packages.nix)): it runs a `nixos/nix` Docker container against a persistent store volume and emits `./result-img/…​.img.zst`.
+- **Flash** (macOS) with `flash-os`: `zstdcat | dd` the `.img.zst` to the SD card, then inject Wi-Fi creds from `secrets/wireless.env` onto the `BEDSIDEBOOT` FAT partition as `wireless.env`.
+- **Wi-Fi** is `wpa_supplicant` in imperative mode (`networking.wireless.enable`, interface `wlan0`, no in-Nix `networks` block). On boot a oneshot mounts `BEDSIDEBOOT`, sources `wireless.env` (`WIFI_SSID`/`WIFI_PASSWORD`), and writes `/etc/wpa_supplicant/wifi.conf`; a `wpa_supplicant-wlan0` override points `ExecStart` at that file. `wlan0` gets its address by DHCP. `openssh` is enabled for `deploy-os` / debugging.
+- **Iterate without reflashing**: `deploy-os` runs `colmena apply` (inside a `nixos/nix` container) to push an incremental configuration change over SSH to the running device (`buildOnTarget = false`, so the build happens on the dev host).
+- Silent, appliance-like boot is a property of the Nix config (kernel cmdline / `config.txt`), not a hand-edited `cmdline.txt` on the card.
 
 
 ### 5.2 Partition layout
 
-| Partition | FS    | Mount                          | Mode              | Purpose                                                     |
-| --------- | ----- | ------------------------------ | ----------------- | ----------------------------------------------------------- |
-| p1        | vfat  | /boot/firmware                 | ro at runtime     | Pi firmware + config.txt                                    |
-| p2        | ext4  | / (lower)                      | ro via overlay    | OS, Go binary, Cog, assets                                  |
-| p3        | ext4  | /var/lib/bedside               | rw, sync, noatime | boltdb (library, positions), cover cache, audiobook files   |
-| tmpfs     | tmpfs | /var/log, /tmp, /var/cache/cog | rw                | Volatile; WebKit disk cache lives here so SD never sees it. |
+The Nix SD image is the standard two-partition aarch64 layout; there is no separate app partition — `/var/lib/bedside` is a systemd `StateDirectory` on the root filesystem.
+
+| Partition | FS    | Mount            | Mode              | Purpose                                                                                     |
+| --------- | ----- | ---------------- | ----------------- | ------------------------------------------------------------------------------------------ |
+| p1        | vfat  | (firmware)       | ro at runtime     | `BEDSIDEBOOT`: RPi firmware, `config.txt`, `overlays/`, `panel.bin`, `wireless.env`         |
+| p2        | ext4  | /                | rw (nix store ro) | NixOS system + `/nix/store` (immutable) + the `bedside` binary; `expandOnBoot` grows it      |
+| dir       | ext4  | /var/lib/bedside | rw                | bbolt (`library.db`), audiobook files, cover dir — `StateDirectory` + `ReadWritePaths`      |
+| —         | ext4 (root) | /var/log   | rw                | journald flushes to SD every 1s (`SyncIntervalSec=1`) so logs survive an unplanned power-cut; not tmpfs today. `zramSwap` (150%) absorbs memory pressure separately. A tmpfs `/var/log` is a possible future hardening (planned) that would trade away that durability. |
 
 ### 5.3 Packages
 
-```sh
-# No xserver-xorg, no chromium. KMS/DRM-direct.
-apt install --no-install-recommends \
-  cog libwpebackend-fdo-1.0-1 \
-  libwpewebkit-1.1-0 \
-  mpv libmpv2 \
-  fonts-inter \
-  libasound2 alsa-utils \
-  network-manager
-```
+No browser, no X, no package manager on the device. Runtime packages are declared in NixOS ([system/configuration.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/system/configuration.nix)); the important ones are tiny:
 
-**Verified May 2026**: Cog ships in Raspberry Pi OS Bookworm (cog 0.16.1-1, with libwpewebkit-1.1 dependencies). `apt install cog` works out of the box. If you need newer (worth doing — WebKit moves fast), pull from Igalia's repo or build from source.
+- **`mpv`** — the audio backend (uses its own bundled ffmpeg). Present system-wide and on the `bedside` unit's `path`.
+- **`ffmpeg-headless`** — supplies **`ffprobe`** for the library scanner (duration/chapter metadata). It is on the `bedside` unit's `path` specifically because mpv's ffmpeg does not expose a standalone `ffprobe`.
+- **ALSA** — `snd_bcm2835` is blacklisted so the MAX98357A I2S DAC is the only (and default, **card 0**) sound card. `/etc/asound.conf` pins the default PCM to `plug` → `hw:0,0` and the default control to `card 0`, though the app also names the card explicitly so it doesn't depend on that default.
 
-**Caveat to track**: there are open reports of Cog/WPE WebKit lacking GPU acceleration on Pi 4 under Bookworm, falling back to software rasterization for some content. For our use case (mostly static HTML, occasional cover-art swap, no CSS animations) software raster is more than fine, but avoid CSS transitions and animated SVG. Use plain DOM updates via Datastar fragments — which is what we were doing anyway. Worth a smoke test on the actual device before committing.
-
-Upstream: [github.com/Igalia/cog](https://github.com/Igalia/cog) · WebKitGTK: [webkitgtk.org](https://webkitgtk.org/) · Datastar: [data-star.dev](https://data-star.dev)
+A separate, minimal custom ffmpeg (`ffmpeg-aax`, built `--disable-everything` with just the codecs needed for lossless `.aax → .m4b` stream-copy decrypt) exists only for the offline `audible-convert` tool in [nix/packages.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/nix/packages.nix). It is **not** used by mpv or the scanner.
 
 ### 5.4 Boot ordering
 
-systemd dependency graph for kiosk-up. No graphical.target, no display-manager:
+There is exactly **one** service. No `graphical.target`, no display-manager, no second process to sequence — the Go binary both plays audio and draws the screen.
 
 ```
-network-online.target
-        │
-        v
-bedside.service        (Go server: starts mpv, opens listeners on :8080)
-        │
-        v
-bedside-ready.target   (custom: bedside.service has bound :8080)
-        │
-        v
-cog.service            (Cog --platform=drm @ http://localhost:8080)
+sound.target
+     │
+     v
+bedside.service   (the Go binary: opens mpv, mmaps the panel fb, draws the UI)
+     │
+     v
+multi-user.target
 ```
 
-#### /etc/systemd/system/bedside.service
+The unit is declared in NixOS ([system/configuration.nix](file:///Users/jadams/code/github/jasonkradams/bedside-reader/system/configuration.nix)), not as a hand-written `.service` file:
 
-This service runs the Go server. The configuration file is stored in the repository at [systemd/bedside.service](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/systemd/bedside.service).
+- `Type = notify` with `WatchdogSec = 30`; the Go binary calls `sd_notify(READY=1)` at startup and pings the watchdog thereafter.
+- `ExecStart = ${bedside-app}/bin/bedside`, `Restart = always`, `RestartSec = 2`.
+- `after = [ sound.target ]`, `wantedBy = [ multi-user.target ]`.
+- Runs as user/group `bedside` with `SupplementaryGroups = [ video input gpio audio render ]` so it can touch the framebuffer, GPIO, and ALSA without root.
+- `path = [ mpv ffmpeg-headless ]`; `StateDirectory = bedside` and `ReadWritePaths = /var/lib/bedside`.
+- An `ExecStartPre` exports and chowns the backlight GPIO line to the `gpio` group.
 
-#### /etc/systemd/system/cog.service
-
-This service runs the Cog kiosk on KMS/DRM. The configuration file is stored in the repository at [systemd/cog.service](file:///Users/jasonadams/code/github/jasonkradams/bedside-reader/systemd/cog.service).
-
-
-**Why this is shorter than the Chromium version**: no Xorg, no Openbox, no unclutter, no PAM session, no display number, no user-data-dir tax. Cog opens `/dev/dri/card0` directly, KMS gives it the framebuffer, WebKitGTK draws into it. The user just needs `video` + `render` groups.
+**Why this is short**: the app opens `/dev/fbN` and the GPIO/ALSA devices directly; there is no window system, no login session, no display number, and nothing waiting on the network for a local socket.
 
 ### 5.5 Time-keeping (NTP only)
 
 The Pi has no real-time clock and we've explicitly skipped the DS3231 to keep the build cheap and the BOM short. Time-keeping relies on NTP:
 
-- Pi OS Lite enables `systemd-timesyncd` by default; it picks up the configured NTP servers and corrects drift automatically once wifi is up.
-- **Boot-up UX**: the clock displays `--:--` until time sync completes (usually <2s after wifi connects). The Go server gates the clock-display element on `!time.Now().Before(time.Unix(1700000000, 0))` — i.e., show dashes if the clock is implausibly old.
-- **fake-hwclock** ships in Pi OS and writes the last-known time to disk on shutdown so boot starts roughly in the right decade. Leave it enabled.
-- **If a power loss happens during a wifi outage**: clock reads dashes until wifi recovers. Acceptable trade-off for the $20 we saved by skipping the DS3231.
-- **Adding a DS3231 later** is a 20-minute job: four-wire I2C breakout, one `dtoverlay=i2c-rtc,ds3231` line, `sudo apt remove fake-hwclock`. Don't pre-optimize.
+- This is NixOS, not Raspberry Pi OS: `systemd-timesyncd` is enabled by NixOS's own defaults (nothing in `configuration.nix` disables or overrides it) and syncs against the configured NTP servers once wifi is up. There's no `apt` and no Pi-OS-specific timesync package here.
+- There is no RTC and no boot-time clock-persistence helper on this build (Raspberry Pi OS ships one of those as a Debian package; this NixOS image has no `apt` and doesn't include an equivalent). On a cold boot with no network yet, the clock sits wherever the kernel's default/last-known time lands until `timesyncd` corrects it.
+- **If a power loss happens during a wifi outage**: the system clock is wrong until wifi recovers and `timesyncd` resyncs. Acceptable trade-off for the $20 we saved by skipping the DS3231.
+- **No clock is rendered on the panel today.** `ui.go`'s `renderPlayer` draws title, chapter title, status line, chapter progress bar, and chapter/total time — no clock (see §6). A clock element, and gating it on a plausible-time check so it doesn't flash a 1970-ish date right after boot, is a **planned** UI addition, not implemented.
+- **Adding a DS3231 later** is a 20-minute job: four-wire I2C breakout, one `dtoverlay=i2c-rtc,ds3231` line in `system/boot/config.txt`. Don't pre-optimize.
 
 ### 5.6 Position resume strategy
 
-Two layers:
+Two bbolt buckets do the work:
 
-- **On-device (bbolt)**: written every SSE tick (~1Hz) and again on `pause`/`stop`/`SIGTERM`. Survives power yank because bbolt fsyncs. This is the source of truth for cold boot.
-- **mpv watch-later**: leave disabled — we own resume.
+- **`progress`** — playback position per book, keyed by base filename, stored as a `%f` string. Written on progress ticks but **throttled to at most once every 10s** so the SD card isn't hammered; reset to 0 only on a true `eof`. Survives a power yank because bbolt fsyncs.
+- **`system`** — a single `SystemState` (active file, `playing`, screen timeout, volume, encoder mode) that captures what the device should look like after a reboot.
 
-On boot: load last-played `fileHash` from bbolt, fetch metadata from boltdb `library` bucket, seek mpv to the chosen offset, do **not** auto-play. Show now-playing screen with a big play affordance — bedside ergonomics: never start blasting audio because power flickered.
+On boot (`main.go`): read `SystemState`; if it names an active file, `LoadFile` it — which resumes the saved position — and restore volume, encoder mode, and screen timeout. `LoadFile` auto-plays, so the app immediately toggles pause back off **only if** the device was paused before shutdown; i.e. it faithfully restores the prior play/pause state rather than always blasting or always idling. With no saved state, it comes up idle in the library menu.
 
-### 5.7 Sleep timer as SSE-driven hypermedia
+### 5.7 Screen timeout & wake
 
-UI: rotary press on now-playing cycles `Off → 15 → 30 → 45 → 60 → Off`. Server holds a `time.Timer` and a `remaining` field. On every second, the Web component sends a Datastar `MergeFragments` patch to a `#sleep-timer` div. At T-30s, switch to fade mode: each tick lowers volume linearly via mpv `set_property volume X`. At T=0 emit `pause` and back to `Off`.
+The bedside power-saver is a **screen timeout**, driven entirely by in-process `time.Timer`s in the App controller — no audio sleep timer, no server-push, no web UI.
 
-This is purely server state pushed as HTML — no client timer drift, no JS countdown logic, and the UI is exactly correct after a reconnect.
+- The timeout is a setting cycled from the library menu's **Settings row** (menu index 0): it steps through the ring `[Off, 1m, 5m, 15m, 60m]` (default 5m) and persists to `SystemState`.
+- Any input resets the timer via `resetScreen`. When it fires it publishes a `"screen-timeout"` event; the handler blanks the backlight (`SetBacklight(false)`) — the **framebuffer contents are left intact**, only the light goes off.
+- **Double-click the encoder** (two presses within 400ms) toggles the screen off/on manually. A single press (resolved after the 400ms double-click window) either cycles the timeout (on the Settings row), selects a book (on a book row), or toggles the encoder mode.
+- Waking restores full backlight and re-arms the timeout. Encoder *rotation* deliberately does not wake the screen from a hard-off state; it just adjusts volume/scrub or scrolls the menu when the screen is on.
 
 ---
 
-## 6. UI sketch with Datastar
+## 6. UI sketch (native framebuffer)
 
 ### 6.1 Screens
 
-| Screen          | Primary purpose                                             | Affordances                                                         |
-| --------------- | ----------------------------------------------------------- | ------------------------------------------------------------------- |
-| **Home**        | Glanceable status; clock when idle                          | Continue listening (1 card), library button, settings, current time |
-| **Library**     | Browse + search                                             | Encoder scrolls list; press selects; back returns home              |
-| **Now playing** | Most stateful screen; cover, chapter, progress, sleep timer | Play/pause, ±30s, sleep timer toggle, back                          |
-| **Settings**    | Backlight, volume, scan library, restart                    | Encoder + buttons                                                   |
-| **Clock-only**  | Display-off-but-clock mode                                  | Any button wakes to previous screen                                 |
+There are two screens, plus a hard-off state. The library menu is drawn as an overlay on top of the player screen, so "menu" is a flag, not a separate page.
+
+| Screen           | Primary purpose                                                     | Affordances                                                                          |
+| ---------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| **Player**       | Now-playing status: title, chapter, play state, progress, times    | Play/pause, skip chapter, encoder scrub/volume; idle title is "Bedside Audio"        |
+| **Library menu** | Browse + pick a book; adjust settings                              | Row 0 = Settings (screen timeout); rows 1..N = books; encoder or X/Y scroll, press selects |
+| **Screen-off**   | Backlight blanked after timeout or double-click (framebuffer kept) | Any button (or another double-click) wakes it back to full backlight                 |
 
 ### 6.2 Layout (Display HAT Mini, 320×240 landscape)
 
-At 2.0" we have to be aggressive about hierarchy: clock is largest on idle, cover art shrinks to thumbnail on now-playing, transport hints map to the four onboard HAT buttons rather than touch targets. Library list shows 4 items at a time and scrolls via the rotary encoder.
+At 320×240 the UI is text and rectangles drawn with `basicfont.Face7x13`. The player screen stacks left-aligned lines at fixed Y offsets; the library menu dims the background and lists rows with marker prefixes. A small Wi-Fi signal icon sits at the top-right (green = up, red with an X = down). No cover art is rendered.
 
 ```
-Home / Idle                             Now Playing
-┌──────────────────────────────┐        ┌──────────────────────────────┐
-│                              │        │ Project Hail Mary    23:14   │
-│           23:14              │        │ Ch.14 - "Eridian"            │
-│                              │        │                              │
-│      Project Hail Mary       │        │  ┌──────┐                    │
-│      Ch.14  3h 12m left      │        │  │cover │  =====o--- 6:42    │
-│                              │        │  │  90px│              /18:03│
-│                              │        │  └──────┘                    │
-│   [Library]   [Settings]     │        │                              │
-│                              │        │  A:play  B:back  X:-30  Y:+30│
-└──────────────────────────────┘        │  Sleep: 28:14                │
-                                        └──────────────────────────────┘
+Player screen                             Library menu (overlay)
+┌──────────────────────────────┐         ┌──────────────────────────────┐
+│ Project Hail Mary        ▂▄▆ │  wifi   │                          ▂▄▆ │
+│                              │         │  Library Menu                │
+│ Chapter 14 - Eridian         │         │                              │
+│                              │         │ > Settings: Screen Timeout   │
+│ Playing  |  Vol: 45%         │         │      [5m]                    │
+│                              │         │   Project Hail Mary          │
+│ ██████████████░░░░░░░░░░░░░░ │  (bar)  │ * Cryptonomicon              │
+│                              │         │   The Three-Body Problem     │
+│ Chap: 06:42 / 18:03          │         │   Educated                   │
+│ Total: 01h12m / 09h48m       │         │                              │
+└──────────────────────────────┘         └──────────────────────────────┘
 
-Library browse                          Encoder maps:
-┌──────────────────────────────┐        Rotate L/R --> scroll list / change volume
-│ Library         (scrollable) │        Click       --> select / context action
-│                              │
-│ > Project Hail Mary  3h 12m  │        HAT button maps (default):
-│   Cryptonomicon     12h 04m  │        A = Play/Pause
-│   The Three-Body    8h 51m   │        B = Back / parent screen
-│   Educated          11h 22m  │        X = Skip -30s
-│                              │        Y = Skip +30s
-└──────────────────────────────┘
+Status line reads "Idle" / "Playing" /     Markers: "> " selected row,
+"Paused", then "| Vol: N%" in volume        "* " the book currently loaded,
+mode or "| Mode: Scrub" in scrub mode.      "  " otherwise.
+
+HAT buttons                               Rotary encoder
+  A (GPIO5)  = Play / Pause                  Turn (vol mode)   = volume +/- 5
+  B (GPIO6)  = toggle Library menu           Turn (scrub mode) = seek +/- 15s
+  X (GPIO16) = skip chapter back /           Turn (in menu)    = scroll rows
+               scroll menu down              Press (single)    = select / cycle
+  Y (GPIO24) = skip chapter fwd /                                timeout / toggle mode
+               scroll menu up                Press (double)    = screen off / on
 ```
 
-### 6.3 Now-playing template (templ + Datastar)
+### 6.3 Render pipeline
 
-Server endpoint `GET /now-playing` returns full HTML. `GET /sse` streams Datastar `merge-fragments` events as state changes.
+`render()` locks the canvas, clears it to the background color, draws the player screen, overlays the menu when active, stamps the Wi-Fi icon, then packs the RGBA canvas into RGB565 straight into the `mmap`. It is invoked by the bus subscriber (`listen`) on state changes and by the Wi-Fi poller on link changes.
 
 ```go
-// internal/web/templates/nowplaying.templ
-package templates
+// internal/ui/ui.go (abbreviated, faithful to the real code)
 
-templ NowPlaying(s State) {
-  <main id="screen"
-        data-on-load="@get('/sse')"
-        data-on-keydown__window="@post('/key', {key: evt.key})">
-    <header>
-      <button data-on-click="@post('/nav/back')">◀</button>
-      <h1>Now Playing</h1>
-    </header>
+func (r *Renderer) render() {
+    r.mu.Lock()
+    defer r.mu.Unlock()
 
-    <img id="cover" src={ "/cover/" + s.ItemID } width="480" height="480"/>
+    // 1. Clear background (dark blue).
+    draw.Draw(r.canvas, r.canvas.Bounds(),
+        &image.Uniform{colorBackground}, image.Point{}, draw.Src)
 
-    <div id="meta">
-      <h2 id="title">{ s.Title }</h2>
-      <p id="chapter">{ s.ChapterTitle }</p>
-    </div>
-
-    <div id="progress" data-signals={ "{pos: " + fmtFloat(s.Position) + "}" }>
-      <div id="bar" data-style-width="(signals.pos / { s.Duration }) * 100 + '%'"></div>
-      <span id="elapsed" data-text="formatTime(signals.pos)">{ formatTime(s.Position) }</span>
-      <span id="duration">{ formatTime(s.Duration) }</span>
-    </div>
-
-    <div id="controls">
-      <button data-on-click="@post('/cmd/skip', {delta: -30})">−30</button>
-      <button data-on-click="@post('/cmd/playpause')"
-              data-text="signals.playing ? '⏸' : '⏯'">
-        if s.Playing { ⏸ } else { ⏯ }
-      </button>
-      <button data-on-click="@post('/cmd/skip', {delta: 30})">+30</button>
-    </div>
-
-    <div id="sleep-timer">
-      if s.SleepRemaining > 0 {
-        💤 Sleep: { formatTime(s.SleepRemaining) }
-      } else {
-        <button data-on-click="@post('/sleep/cycle')">💤 Sleep timer</button>
-      }
-    </div>
-  </main>
-}
-```
-
-#### SSE handler emitting fragments
-
-```go
-// internal/web/sse.go
-func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
-    sse := datastar.NewSSE(w, r)
-    sub := s.bus.Subscribe(r.Context(),
-        EventPlaybackTick, EventChapterChange,
-        EventSleepTick, EventBacklight)
-
-    for ev := range sub {
-        switch e := ev.(type) {
-        case PlaybackTick:
-            // update only the bits that changed
-            sse.MergeSignals([]byte(fmt.Sprintf(`{pos: %.2f, playing: %v}`,
-                e.Position, e.Playing)))
-        case ChapterChange:
-            // re-render header + cover URL
-            sse.MergeFragments(render(templates.NowPlayingHeader(e.State)))
-        case SleepTick:
-            sse.MergeFragments(render(templates.SleepTimerFragment(e.Remaining)))
-        case Backlight:
-            // fully off but clock-only? swap entire screen.
-            if e.Mode == ClockOnly {
-                sse.MergeFragments(render(templates.ClockOnly()))
-            }
-        }
+    // 2. Player screen, then the menu overlay if it's open.
+    r.renderPlayer()
+    if r.menuState.Active {
+        r.renderMenu()
     }
+    r.drawWiFiIcon(300, 10, r.wifiConnected)
+
+    // 3. Pack RGBA -> RGB565 and write to the mmapped framebuffer.
+    copyToRGB565(r.mmap, r.canvas)
 }
-```
 
-**Why this is clean**: position updates ride on `data-signals` (1 small JSON write per second, 80 bytes), but anything structural (chapter title, cover, sleep mode) is a server-rendered HTML fragment patched into the DOM. No client logic computes anything except `formatTime`, which is a one-line Datastar expression.
-
-#### Input → command (rotary press cycles sleep timer)
-
-```go
-// internal/input/handlers.go — encoder push event
-case InputEncoderPress:
-    if s.screen == ScreenNowPlaying {
-        s.bus.Publish(CmdSleepCycle{})
+// Text is stamped with basicfont via a font.Drawer.
+func addLabel(img *image.RGBA, x, y int, label string, col color.RGBA) {
+    d := &font.Drawer{
+        Dst:  img,
+        Src:  image.NewUniform(col),
+        Face: basicfont.Face7x13,
+        Dot:  fixed.Point26_6{X: fixed.I(x), Y: fixed.I(y)},
     }
+    d.DrawString(label)
+}
 
-// internal/web/handlers.go — also reachable via UI button
-func (s *Server) sleepCycle(w http.ResponseWriter, r *http.Request) {
-    s.bus.Publish(CmdSleepCycle{})
-    w.WriteHeader(http.StatusNoContent)
+// RGB565, little-endian, packed directly into the framebuffer bytes.
+func copyToRGB565(dst []byte, src *image.RGBA) {
+    // ... for each pixel:
+    //   r5 := uint16(r) >> 3; g6 := uint16(g) >> 2; b5 := uint16(b) >> 3
+    //   rgb565 := (r5 << 11) | (g6 << 5) | b5
+    //   dst[o] = byte(rgb565); dst[o+1] = byte(rgb565 >> 8)
 }
 ```
 
-### 6.4 Datastar attributes used
+`renderPlayer` draws the title at y=30, chapter title at y=70, the status line at y=110, a 300px-wide chapter progress bar at y=150, and the `Chap:`/`Total:` time lines at y=180 and y=200. `renderMenu` fills a dim overlay, draws the "Library Menu" header, then the Settings row and book rows starting at y=70 with a 25px row pitch, scrolling so the selected row stays visible.
 
-| Attribute                 | Where                                   | Effect                                                             |
-| ------------------------- | --------------------------------------- | ------------------------------------------------------------------ |
-| `data-on-load`            | Root `<main>`                           | Open SSE stream on page load.                                      |
-| `data-on-click`           | Buttons                                 | POST to action endpoint; server responds 204 + emits SSE fragment. |
-| `data-on-keydown__window` | Root                                    | Dev convenience: keyboard maps to GPIO actions on the desk.        |
-| `data-signals`            | Progress block                          | Local signals updated by `merge-signals` events.                   |
-| `data-text`               | Elapsed time, play/pause icon           | Bind text to a signal expression.                                  |
-| `data-style-width`        | Progress bar                            | Reactive width as `pos/duration*100%`.                             |
-| `data-show`               | Conditional UI (e.g., sleep timer pill) | Hide/show based on signal.                                         |
+### 6.4 Input → event → effect
+
+Input watchers publish typed events onto the bus; the App controller (`app.go`) turns them into player/menu actions and republishes state, which the renderer repaints. There are no HTTP endpoints — this table is the whole control surface.
+
+| Event                     | Source                     | Effect                                                                          |
+| ------------------------- | -------------------------- | ------------------------------------------------------------------------------- |
+| `EventButtonPlayPause`    | HAT button A               | Wake if off; else in menu select the highlighted book, else toggle pause.       |
+| `EventButtonMenu`         | HAT button B               | Toggle the library menu; on open, highlight the currently-playing book.         |
+| `EventButtonSkipBack`     | HAT button X               | In menu scroll down (index++); else `SkipChapter(-1)`.                          |
+| `EventButtonSkipFwd`      | HAT button Y               | In menu scroll up (index--); else `SkipChapter(+1)` unless at the last chapter. |
+| `EventEncoderTurn` (±1)   | encoder A/B poll           | In menu scroll; else scrub ±15s (scrub mode) or volume ±5 (vol mode).           |
+| `EventEncoderBtn`         | encoder push               | Single (post-400ms): cycle timeout / select book / toggle encoder mode. Double (<400ms): screen off/on. |
+| `screen-timeout`          | `time.Timer`               | Blank the backlight; framebuffer contents are retained.                          |
+| `EventPlayerStateChanged` / `EventPlayerProgressTick` | Player | Renderer repaints the player screen with new position/state.                    |
+| `EventMenuUpdate`         | App controller             | Renderer repaints (or clears) the menu overlay.                                  |
 
 ---
 
@@ -664,40 +619,40 @@ func (s *Server) sleepCycle(w http.ResponseWriter, r *http.Request) {
 
 ### 7.1 True-off backlight
 
-Writing 0 to `/sys/class/backlight/.../brightness` on the Display HAT Mini fully extinguishes the LEDs — verify in a dark room before final assembly. If you see residual glow, add a P-channel MOSFET on the backlight power rail driven by a free GPIO and you have a hard kill.
+Backlight off is `SetBacklight(false)` → `"0"` written to the backlight class device if one exists, otherwise to BCM GPIO13 via sysfs (the real path on this build). Verify in a dark room before final assembly that it fully extinguishes the LEDs. If you see residual glow, add a P-channel MOSFET on the backlight power rail driven by a free GPIO and you have a hard kill.
 
-### 7.2 Wake-on-button from display-off
+### 7.2 Wake-on-button from screen-off
 
-Don't blank or kill Cog; that adds a flash on wake and forces a WebKit relayout. Instead leave Cog running, set backlight duty=0, and on `InputEvent` ramp duty back over 250ms. Encoder rotation should NOT wake (avoid accidental brushes); only **button presses** wake. The encoder push button counts as a button.
+There's nothing to blank or relaunch — the framebuffer stays mapped and its contents intact; only the light goes out. On timeout or a double-click the app calls `SetBacklight(false)`; on wake it calls `SetBacklight(true)` and re-arms the timeout. Encoder rotation deliberately does not wake from a hard-off state (avoid accidental brushes); button presses do, and the encoder push counts as a button.
 
-### 7.3 Clock-only mode
+### 7.3 Screen-off vs. always-on
 
-Distinct from display-off. Backlight at ~5%, screen renders a giant clock with no other elements (battery-AMOLED-style if you want), no cover. Triggered after N minutes of no playback + idle. Any button returns to last screen at full backlight.
+The current build has one power-saving state: backlight fully off (see §5.7). It is not a dimmed clock mode — the panel goes dark and the framebuffer is simply retained. A future dim/clock-only mode (backlight at a low level with a reduced screen) would slot in here as an extra branch, but the code today toggles between full-on and off.
 
 ### 7.4 Brownout / SD-card protection
 
-- **Read-only root** as described in 5.2. The Pi will power-cycle ungracefully someday and you don't want fsck nor a corrupted WebKit cache.
-- **Overlay tmpfs for `/var/log`** so journald doesn't write through to SD.
+- **Root filesystem is read-write ext4 today** (`fileSystems."/"` in `configuration.nix` sets no `ro` option). Only `/nix/store` is immutable — a property of Nix itself, not a mount flag. A fully read-only root is a possible future hardening (planned) if SD wear becomes a real problem.
+- **journald flushes to SD every 1 second** (`SyncIntervalSec=1`) specifically so logs survive an unplanned power-cut — the opposite of overlaying tmpfs. Trading that durability for a tmpfs `/var/log` (fewer SD writes, logs lost on a crash) is a possible future hardening (planned), not configured today.
 - **bbolt on rw partition** with `sync` mount option. Position writes are tiny; the SD endurance card handles them fine.
-- **Watchdog**: enable BCM2837 hardware watchdog in `config.txt` (`dtparam=watchdog=on`) and `WatchdogSec=30` on `bedside.service`. If the Go server hangs, the hardware reboots.
+- **Watchdog**: enable BCM2837 hardware watchdog in `config.txt` (`dtparam=watchdog=on`) and `WatchdogSec=30` on `bedside.service`. If the `bedside` binary hangs, the hardware reboots.
 - **Undervoltage flags**: monitor `vcgencmd get_throttled` in a tiny exporter to journald. Use a quality USB cable; bedside HDMI capture during testing eats current.
 
 ### 7.5 Fan-free thermal design
 
-- Pi Zero 2 W idles at 45–55°C in a closed plastic case at 22°C ambient. Spoken-word playback is near-idle CPU load; Cog with one document and no animation hovers around 4–8% CPU — meaningfully lower than Chromium would have been.
+- Pi Zero 2 W idles at 45–55°C in a closed plastic case at 22°C ambient. Spoken-word playback is near-idle CPU load; the native renderer only repaints the 320×240 framebuffer on state changes, so the UI's CPU cost is negligible — there is no browser or layout engine burning cycles.
 - Display HAT Mini stacks directly on the GPIO header, sitting above the SoC. Idle thermals don't require a heatsink. If you ever load the device with anything heavier (don't), drill a few vent slots above the SoC in the enclosure.
 - Hardwood final enclosure: cut a hidden vent slot at the back.
 
 ### 7.6 Boot UX
 
 - Plymouth splash with a single static image (cover-art-style). No spinner — it looks like consumer firmware, not a Pi booting.
-- `disable_overscan=1` even though we're SPI — sets a clean baseline for the framebuffer Cog inherits.
-- Disable rainbow boot square in `config.txt`: `disable_splash=1`.
+- `disable_overscan=1` even though we're SPI — sets a clean baseline for the framebuffer.
+- You could disable the rainbow boot square by adding `disable_splash=1` to `config.txt` — it is not currently set there.
 
 ### 7.7 Audio gotchas
 
-- MAX98357A has a small turn-on transient (click) when the amp first comes out of shutdown. Mitigate by leaving the SD pin floating (amp stays awake) and by keeping mpv running idle (`--idle`) so the I2S clock stays alive; sleep timer fades volume to silence rather than hard-pausing.
-- ALSA volume limit: set a hard ceiling in `/etc/asound.conf` so a fat-fingered encoder spin can't blast at 3am. Map UI 0–100% to ALSA 0–80% of nominal.
+- MAX98357A has a small turn-on transient (click) when the amp first comes out of shutdown. On this build the amp's SD/enable pin is **GPIO26**, owned by the **kernel `max98357a` driver** via the DT overlay (`dtoverlay=max98357a,sdmode-pin=26`) and toggled automatically by ALSA/DAPM on stream start/stop — the app deliberately does **not** touch GPIO26 (driving it from userspace would race the kernel and mute audio). To mask pops the player instead mutes on file transitions and unmutes on `file-loaded`, and keeps mpv running idle (`--idle`) so the pipeline stays warm.
+- ALSA volume ceiling: not configured today. `/etc/asound.conf` (§5.3) only pins the default PCM/ctl to card 0, and the app clamps its own volume to 0–100% in software (`handleVolumeChange`) with no cap below that. If a fat-fingered encoder spin at 3am worries you, you could add a hard ceiling in `/etc/asound.conf` (e.g. map UI 0–100% to ALSA 0–80% of nominal) — that's a suggestion, not current behavior.
 - Sample-rate mismatch: Audiobook files may be 22.05 / 44.1 / 48 kHz mixed in a single book. Let mpv resample; don't try to set the ALSA device rate.
 - **Speaker-driver sizing reality check**: CE32A-4 is a 1.25" full-range. It will not deliver chest-thumping bass — it doesn't need to. Spoken word lives in 200Hz–6kHz and the CE32A-4 covers that range cleanly. If you find yourself wanting more bottom-end in evaluation, a small (~30 cubic inch) sealed enclosure with a fistful of polyfill helps; do not chase the missing low end by EQ — you'll just bottom out the driver and clip.
 - **Mono is fine for spoken word at this scale.** The MAX98357A is mono by design; if you ever want stereo, you wire two of them in parallel (one set to left channel, one to right via the SEL pin) and add a second CE32A-4. That's a $20 upgrade you can do later without ripping anything out.
@@ -705,7 +660,7 @@ Distinct from display-off. Backlight at ~5%, screen renders a giant clock with n
 ### 7.8 Privacy / scope
 
 - No microphone. No speech assistant. No phone pairing. The bedroom stays a phone-free zone — that's the whole point.
-- Local network only. The device only connects to wifi for NTP time sync and Samba (SMB) file transfers. No outbound calls, no telemetry. Block egress at your router if you want belt-and-suspenders.
+- Local network only. The device only connects to wifi for NTP time sync and, when loading books, an SSH session (`scp`/`rsync`). No outbound calls, no telemetry. (A Samba share for drag-and-drop transfers is planned, not configured.) Block egress at your router if you want belt-and-suspenders.
 
 ---
 
@@ -714,10 +669,10 @@ Distinct from display-off. Backlight at ~5%, screen renders a giant clock with n
 | Phase | Milestone            | Definition of done                                                                                                                                    |
 | ----- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **0** | Bench rig            | Pi Zero 2 W + Display HAT Mini + MAX98357A breadboarded with a single CE32A-4 speaker. Plays a hardcoded local M4B; backlight goes to zero on demand. |
-| **1** | Go skeleton          | templ + chi + Datastar SSE; Cog kiosk loads the page; pressing HAT Button A pauses playback.                                                          |
+| **1** | Go skeleton          | Event bus wired; the Go binary `mmap`s the panel framebuffer and draws the player screen; pressing HAT Button A pauses playback.                       |
 | **2** | Local Library Scan   | `ffprobe` scans `/var/lib/bedside/audiobooks`, populates `boltdb`, and mpv plays local files directly.                                                |
 | **3** | Library UI           | Browse + search via encoder; cover art rendering at 480px square.                                                                                     |
-| **4** | Now-playing complete | Chapter changes, ±30, sleep timer, real-time progress.                                                                                                |
+| **4** | Now-playing complete | Chapter changes (prev/next), sleep timer, real-time progress.                                                                                                |
 | **5** | Bedside polish       | Backlight modes, clock-only, wake-on-button, read-only root, watchdog.                                                                                |
 | **6** | Prototype enclosure  | PETG box; speaker baffle tuned; live with it for two weeks.                                                                                           |
 | **7** | Final hardwood       | Once you've found what's wrong with the prototype.                                                                                                    |
