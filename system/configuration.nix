@@ -27,6 +27,17 @@
       "bcm2835_dma"
       "i2c_bcm2835"
     ];
+
+    # The ST7789 panel's compatible ("panel-mipi-dbi-spi") does not trigger a
+    # modalias autoload here, so force the DRM driver on at boot. It probes the
+    # panel@1 node from the mipi-dbi-spi overlay and loads panel.bin (below) as
+    # the init sequence — without this the screen stays a blank backlit rectangle.
+    kernelModules = [ "panel-mipi-dbi" ];
+
+    # Drop the onboard VideoCore audio card so the MAX98357A I2S DAC is the only
+    # (and therefore default) ALSA card — otherwise mpv plays to the unconnected
+    # headphone jack (card 0) instead of the speaker.
+    blacklistedKernelModules = [ "snd_bcm2835" ];
   };
 
 

@@ -39,14 +39,21 @@ arm_boost=1
 # fight the encoder. Pinning it to 26 both enables the amp and frees GPIO4.
 dtoverlay=max98357a,sdmode-pin=26
 
-# Display HAT Mini ST7789V (SPI) + KMS — DISABLED until validated after audio:
+# Display HAT Mini ST7789 on SPI0/CE1 (DC=GPIO9, 60MHz), validated via modetest.
+# The panel-mipi-dbi driver loads its init sequence from a firmware file named
+# "<first-compatible>.bin". Leaving the overlay's default compatible ("panel") makes
+# it load panel.bin (shipped via hardware.firmware). Do NOT add
+# dtparam=compatible=sitronix,st7789v — that makes it look for sitronix,st7789v.bin,
+# which doesn't exist, so the panel never initialises (blank backlit screen).
+dtoverlay=mipi-dbi-spi,spi0-1,speed=60000000
+dtparam=width=320,height=240,width-mm=43,height-mm=27
+dtparam=dc-gpio=9
+
+# KMS/HDMI (vc4-kms-v3d) and gpio-backlight stay off: the app renders to the SPI
+# panel's own DRM device and drives the GPIO13 backlight via sysfs itself.
 #dtoverlay=vc4-kms-v3d
 #max_framebuffers=2
 #disable_fw_kms_setup=1
-#dtoverlay=mipi-dbi-spi,spi0-1,speed=60000000
-#dtparam=compatible=sitronix\,st7789v\0panel-mipi-dbi-spi
-#dtparam=width=320,height=240,width-mm=43,height-mm=27
-#dtparam=dc-gpio=9
 #dtoverlay=gpio-backlight,gpio=13,active_low=0
 
 # Hardware watchdog (Zero 2 W has BCM2837 watchdog)
