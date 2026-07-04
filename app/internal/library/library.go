@@ -96,7 +96,6 @@ func New(eventBus *bus.Bus, dbPath, audioDir, coverDir string) (*Manager, error)
 	return m, nil
 }
 
-
 // Close closes the underlying boltdb
 func (m *Manager) Close() {
 	m.db.Close()
@@ -128,38 +127,112 @@ func (m *Manager) Scan() {
 }
 
 func (m *Manager) processFile(path string) {
-	// Generate an ID by hashing the filename
-	hash := sha256.Sum256([]byte(filepath.Base(path)))
-	id := hex.EncodeToString(hash[:12])
+	id := idForPath(path)
 
-	// Check if already in DB
-	exists := false
-	m.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketLibrary)
-		if b.Get([]byte(id)) != nil {
-			exists = true
+	book, exists := m.getByID(id)
+	if !exists {
+		log.Printf("Scanning new file: %s", filepath.Base(path))
+		probed, err := m.probeFile(path, id)
+		if err != nil {
+			log.Printf("Failed to probe file %s: %v", path, err)
+			return
 		}
+		book = probed
+	}
+
+	// Extract cover art on first scan, and backfill it for books catalogued
+	// before cover support existed (whose cached image is missing).
+	changed := m.ensureCover(book)
+
+	if !exists || changed {
+		m.save(book)
+	}
+}
+
+// idForPath derives the stable library ID from a file's base name.
+func idForPath(path string) string {
+	hash := sha256.Sum256([]byte(filepath.Base(path)))
+	return hex.EncodeToString(hash[:12])
+}
+
+// getByID returns the stored book for id and whether it was present.
+func (m *Manager) getByID(id string) (*Audiobook, bool) {
+	var book *Audiobook
+	_ = m.db.View(func(tx *bbolt.Tx) error {
+		v := tx.Bucket(bucketLibrary).Get([]byte(id))
+		if v == nil {
+			return nil
+		}
+		var b Audiobook
+		if err := json.Unmarshal(v, &b); err != nil {
+			return nil
+		}
+		book = &b
 		return nil
 	})
+	return book, book != nil
+}
 
-	if exists {
-		return // Already scanned
-	}
-
-	log.Printf("Scanning new file: %s", filepath.Base(path))
-
-	book, err := m.probeFile(path, id)
-	if err != nil {
-		log.Printf("Failed to probe file %s: %v", path, err)
-		return
-	}
-
-	// Save to DB
+func (m *Manager) save(book *Audiobook) {
 	_ = m.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketLibrary)
 		data, _ := json.Marshal(book)
-		return b.Put([]byte(id), data)
+		return tx.Bucket(bucketLibrary).Put([]byte(book.ID), data)
 	})
+}
+
+// CoverPath returns the on-disk path where a book's cover art is (or would be)
+// cached, or "" for an empty id.
+func (m *Manager) CoverPath(id string) string {
+	if id == "" {
+		return ""
+	}
+	return filepath.Join(m.coverDir, id+".jpg")
+}
+
+// ensureCover extracts the embedded cover art to disk if it isn't cached yet and
+// keeps CoverHash in sync (set to the book ID when art exists, "" otherwise).
+// Returns true when the book record changed and needs saving.
+func (m *Manager) ensureCover(book *Audiobook) bool {
+	coverPath := m.CoverPath(book.ID)
+	if _, err := os.Stat(coverPath); err == nil {
+		if book.CoverHash != book.ID {
+			book.CoverHash = book.ID
+			return true
+		}
+		return false
+	}
+
+	if err := extractCover(book.FilePath, coverPath); err != nil {
+		if book.CoverHash != "" {
+			book.CoverHash = ""
+			return true
+		}
+		return false
+	}
+	if book.CoverHash != book.ID {
+		book.CoverHash = book.ID
+	}
+	return true
+}
+
+// extractCover writes a downscaled JPEG of the audiobook's embedded cover art to
+// dst via ffmpeg. Returns a non-nil error when the file has no attached picture.
+func extractCover(src, dst string) error {
+	cmd := exec.Command("ffmpeg",
+		"-y", "-v", "error",
+		"-i", src,
+		"-an",
+		"-map", "0:v:0",
+		"-frames:v", "1",
+		"-vf", "scale=256:256:force_original_aspect_ratio=decrease",
+		"-q:v", "3",
+		dst,
+	)
+	if err := cmd.Run(); err != nil {
+		os.Remove(dst) // don't leave a partial/zero-byte file behind
+		return fmt.Errorf("ffmpeg cover extract: %w", err)
+	}
+	return nil
 }
 
 // probeFile runs ffprobe to extract metadata and chapters from an audiobook file.
@@ -308,6 +381,7 @@ type SystemState struct {
 	Timeout     int     `json:"timeout"`
 	Volume      float64 `json:"volume"`
 	EncoderMode string  `json:"encoderMode"`
+	Font        string  `json:"font"` // UI typeface ID (see internal/ui font registry)
 }
 
 // SaveSystemState saves the full system state
@@ -322,9 +396,10 @@ func (m *Manager) SaveSystemState(state SystemState) error {
 // GetSystemState retrieves the full system state
 func (m *Manager) GetSystemState() (SystemState, error) {
 	state := SystemState{
-		Timeout:     5,      // Default to 5 minutes
-		Volume:      50,     // Default volume
-		EncoderMode: "vol",  // Default to volume mode
+		Timeout:     5,            // Default to 5 minutes
+		Volume:      50,           // Default volume
+		EncoderMode: "vol",        // Default to volume mode
+		Font:        "plex-serif", // mirrors ui.defaultFontID
 	}
 	err := m.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketSystem)

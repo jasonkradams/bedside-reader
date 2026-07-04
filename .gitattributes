@@ -1,0 +1,6 @@
+# Fonts are binary; never munge them.
+*.ttf binary
+*.otf binary
+# Keep bundled OFL license text LF so the tree is byte-clean across platforms
+# (CRLF here made colmena see a "dirty" flake input inside the Linux builder).
+app/internal/ui/assets/fonts/LICENSES/*.txt text eol=lf
