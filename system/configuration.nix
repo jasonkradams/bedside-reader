@@ -6,7 +6,47 @@
   ...
 }:
 
+let
+  # Audio-only mpv. The app uses mpv purely as an ALSA backend (--no-video
+  # --ao=alsa), so drop the video/GL/X11/wayland/pulse/pipewire/yt-dlp tree the
+  # default `mpv` wrapper carries, and build against ffmpeg-headless. Defined here
+  # (not via an overlay in image-optimization.nix) on purpose: colmena sets
+  # nixpkgs.pkgs externally, which makes module-level nixpkgs.overlays silently a
+  # no-op on the deploy path — an overlay would diverge the image from the deploy.
+  mpvAudio = (pkgs.mpv-unwrapped.override {
+    ffmpeg = pkgs.ffmpeg-headless;
+    alsaSupport = true;
+    x11Support = false;
+    waylandSupport = false;
+    drmSupport = false;
+    vulkanSupport = false;
+    vaapiSupport = false;
+    vdpauSupport = false;
+    pulseSupport = false;
+    pipewireSupport = false;
+    jackaudioSupport = false;
+    openalSupport = false;
+    cacaSupport = false;
+    bluraySupport = false;
+    dvdnavSupport = false;
+    dvbinSupport = false;
+    cmsSupport = false;
+    zimgSupport = false;
+    archiveSupport = false;
+    rubberbandSupport = false;
+    bs2bSupport = false;
+  }).overrideAttrs (old: {
+    # Drop the umpv helper (a Python script) — it is the only thing pulling
+    # python3 (~130MB) into mpv's runtime closure, and the app only drives the
+    # main mpv binary over its IPC socket.
+    postInstall = (old.postInstall or "") + ''
+      rm -f "$out/bin/umpv"
+    '';
+  });
+in
 {
+  imports = [ ./image-optimization.nix ];
+
   # Set the release version
   system.stateVersion = "24.05";
 
@@ -83,7 +123,7 @@
   # Install required packages
   environment.systemPackages = [
     bedside-app
-    pkgs.mpv
+    mpvAudio
   ];
 
   # Pin ALSA's "default" PCM to the MAX98357A I2S card (card 0). Without this the
@@ -237,7 +277,7 @@
         
         # mpv plays; ffmpeg-headless provides ffprobe, which the app shells out to
         # for duration/chapter metadata (the project's custom ffmpeg omits ffprobe).
-        path = [ pkgs.mpv pkgs.ffmpeg-headless ];
+        path = [ mpvAudio pkgs.ffmpeg-headless ];
 
         serviceConfig = {
           Type = "notify";

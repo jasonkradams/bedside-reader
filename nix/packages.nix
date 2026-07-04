@@ -116,6 +116,7 @@ let
     version = "1.0.0";
     src = ../app; # Adjust path relative to this file
     vendorHash = "sha256-jJLJ/WK+YHIcg+N+Jvp6v6RHQxw/XxvXL5MIQbarZns=";
+    ldflags = [ "-s" "-w" ]; # strip DWARF + symbol table (image-size lever)
   };
 
   # Script to build the NixOS SD card image natively via Docker / Rancher Desktop / OrbStack
