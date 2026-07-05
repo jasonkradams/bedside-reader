@@ -339,7 +339,7 @@ class EnclosureBuilder:
         self.extrudes.add(topCut)
 
         # Audio Amp Standoffs
-        self._create_standoffs(self.rear_body, rear_plane, 10.15, 2.0, 1.25, 0.0, 0.5)
+        self._create_standoffs(self.rear_body, rear_plane, 9.50, 1.10, 1.25, 0.0, 0.5)
 
         # Pi Zero Standoffs
         self._create_standoffs(self.rear_body, rear_plane, 4.40, 4.10, 5.8, 2.3, 0.5)
