@@ -326,16 +326,20 @@ class EnclosureBuilder:
         # Rotary Hole
         sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(9.25, 2.0, 0), 0.35)
         
-        # Pi Zero Micro USB Hole (Trapezoid, 0.2mm clearance)
+        # Pi Zero Micro USB Hole (Accurate 6-point shape, 0.2mm clearance)
         lines_top = sk_top.sketchCurves.sketchLines
-        p1 = adsk.core.Point3D.create(1.80, 3.03, 0) # Top Left
-        p2 = adsk.core.Point3D.create(2.70, 3.03, 0) # Top Right
-        p3 = adsk.core.Point3D.create(2.575, 3.37, 0) # Bottom Right (Beveled)
-        p4 = adsk.core.Point3D.create(1.925, 3.37, 0) # Bottom Left (Beveled)
+        p1 = adsk.core.Point3D.create(1.855, 3.03, 0) # Top Left
+        p2 = adsk.core.Point3D.create(2.645, 3.03, 0) # Top Right
+        p3 = adsk.core.Point3D.create(2.645, 3.13, 0) # Mid Right (Straight for 1mm)
+        p4 = adsk.core.Point3D.create(2.545, 3.37, 0) # Bottom Right (Beveled)
+        p5 = adsk.core.Point3D.create(1.955, 3.37, 0) # Bottom Left (Beveled)
+        p6 = adsk.core.Point3D.create(1.855, 3.13, 0) # Mid Left (Straight for 1mm)
         lines_top.addByTwoPoints(p1, p2)
         lines_top.addByTwoPoints(p2, p3)
         lines_top.addByTwoPoints(p3, p4)
-        lines_top.addByTwoPoints(p4, p1)
+        lines_top.addByTwoPoints(p4, p5)
+        lines_top.addByTwoPoints(p5, p6)
+        lines_top.addByTwoPoints(p6, p1)
         topCol = adsk.core.ObjectCollection.create()
         for p in sk_top.profiles:
             topCol.add(p)
