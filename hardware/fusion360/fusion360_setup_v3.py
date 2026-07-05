@@ -328,8 +328,8 @@ class EnclosureBuilder:
         
         # Pi Zero Micro USB Hole
         sk_top.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(6.55, 3.2, 0),
-            adsk.core.Point3D.create(6.55 + 0.45, 3.2 + 0.2, 0)
+            adsk.core.Point3D.create(2.25, 3.2, 0),
+            adsk.core.Point3D.create(2.25 + 0.45, 3.2 + 0.2, 0)
         )
         topCol = adsk.core.ObjectCollection.create()
         for p in sk_top.profiles:
