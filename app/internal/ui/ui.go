@@ -220,6 +220,13 @@ func (r *Renderer) render() {
 	// 1. Clear background (dark blue)
 	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{colorBackground}, image.Point{}, draw.Src)
 
+	// 2. Draw a bright red calibration border around the absolute edge (1 pixel thick)
+	red := color.RGBA{255, 0, 0, 255}
+	fillRect(r.canvas, 0, 0, panelWidth, 1, red)              // top
+	fillRect(r.canvas, 0, panelHeight-1, panelWidth, 1, red)  // bottom
+	fillRect(r.canvas, 0, 0, 1, panelHeight, red)             // left
+	fillRect(r.canvas, panelWidth-1, 0, 1, panelHeight, red)  // right
+
 	r.renderPlayer()
 	if r.menuState.Active {
 		r.renderMenu()
