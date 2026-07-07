@@ -87,51 +87,23 @@ class AssemblyBuilder:
                 self._cut_cylinder(comp, xy, hx, hy, 0.1, -0.4, 0.2)
 
     def build_audio_amp(self, transform: adsk.core.Matrix3D):
-        import urllib.request
-        import os
-        import tempfile
+        comp = self.create_component("Audio_Amp_MAX98357A", transform)
+        xy = comp.xYConstructionPlane
         
-        step_url = 'https://raw.githubusercontent.com/adafruit/Adafruit_CAD_Parts/main/3006%20MAX98357/3006%20MAX98357.step'
-        step_url = step_url.replace(' ', '%20')
-        step_file = os.path.join(tempfile.gettempdir(), 'adafruit_3006.step')
+        # 1. Main PCB (19.4mm x 17.8mm x 1.6mm)
+        # We'll center it at 0,0
+        self._extrude_rect(comp, xy, 0, 0, 1.94, 1.78, 0.16, 0.0)
         
-        if not os.path.exists(step_file):
-            urllib.request.urlretrieve(step_url, step_file)
-            
-        importManager = self.app.importManager
-        stepOptions = importManager.createSTEPImportOptions(step_file)
-        stepOptions.isViewFit = False
+        # 2. Black IC Chip (approx 3x3mm)
+        self._extrude_rect(comp, xy, 0, -0.2, 0.3, 0.3, 0.1, 0.16)
         
-        # Create a container component with identity transform first
-        ident = adsk.core.Matrix3D.create()
-        occ = self.root.occurrences.addNewComponent(ident)
-        comp = occ.component
-        comp.name = "Audio_Amp_MAX98357A"
-        
-        # Import into the container
-        importManager.importToTarget(stepOptions, comp)
-        
-        if comp.occurrences.count > 0 or comp.bRepBodies.count > 0:
-            # Center the imported geometry
-            bbox = occ.boundingBox
-            cx = (bbox.maxPoint.x + bbox.minPoint.x) / 2
-            cy = (bbox.maxPoint.y + bbox.minPoint.y) / 2
-            cz = (bbox.maxPoint.z + bbox.minPoint.z) / 2
-            
-            # 1. Shift center to origin
-            mat1 = occ.transform
-            mat1.translation = adsk.core.Vector3D.create(-cx, -cy, -cz)
-            occ.transform = mat1
-            
-            # 2. Apply target rotation/translation sequentially
-            mat2 = occ.transform
-            mat2.transformBy(transform)
-            occ.transform = mat2
-        else:
-            # Fallback if import fails
-            xy = comp.xYConstructionPlane
-            self._extrude_rect(comp, xy, 0, 0, 1.94, 1.78, 0.2, 0.0)
-            occ.transform = transform
+        # 3. Terminal Block bump (top edge)
+        self._extrude_rect(comp, xy, 0, 0.5, 0.8, 0.6, 0.6, 0.16)
+
+        # 4. Mounting Holes (two M2.5 holes)
+        # Top left corner and middle right
+        self._cut_cylinder(comp, xy, -0.7, 0.6, 0.125, -0.4, 0.4)
+        self._cut_cylinder(comp, xy, 0.7, 0.0, 0.125, -0.4, 0.4)
 
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
