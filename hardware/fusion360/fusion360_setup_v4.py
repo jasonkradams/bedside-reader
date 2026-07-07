@@ -102,8 +102,8 @@ class AssemblyBuilder:
 
         # 4. Mounting Holes (two M2.5 holes)
         # Top left corner and middle right
-        self._cut_cylinder(comp, xy, -0.7, 0.6, 0.125, -0.4, 0.4)
-        self._cut_cylinder(comp, xy, 0.7, 0.0, 0.125, -0.4, 0.4)
+        self._cut_cylinder(comp, xy, -0.7, 0.6, 0.125, -0.1, 0.5)
+        self._cut_cylinder(comp, xy, 0.7, 0.0, 0.125, -0.1, 0.5)
 
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
@@ -165,12 +165,10 @@ def run(context):
         mat_encoder.translation = adsk.core.Vector3D.create(-3.0, 2.0, -1.5)
         builder.build_encoder(mat_encoder)
 
-        # 4. Audio Amp (Rotated 90 degrees and vertical against the back of the enclosure)
-        # We rotate 90 degrees around Z, and push it back to Z = -2.5.
+        # 4. Audio Amp
+        # Place it flat against the back wall (Z = -2.5), directly behind the Pi Stack (X = 2.5, Y = -0.5).
         mat_amp = adsk.core.Matrix3D.create()
-        mat_amp.setToRotation(math.pi / 2, adsk.core.Vector3D.create(0, 0, 1), adsk.core.Point3D.create(0,0,0))
-        # Place it at X = -4.0 to tuck it entirely behind the speaker, Y = 0.5, Z = -2.5
-        mat_amp.translation = adsk.core.Vector3D.create(-4.0, 0.5, -2.5)
+        mat_amp.translation = adsk.core.Vector3D.create(2.5, -0.5, -2.5)
         builder.build_audio_amp(mat_amp)
 
         # 5. Power Cable Keepout (Coming out the top of the Pi Zero)
