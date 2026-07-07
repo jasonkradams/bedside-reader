@@ -1,0 +1,13 @@
+{
+	"autodeskProduct":	"Fusion360",
+	"type":	"addin",
+	"id":	"4c87a55c-2041-4775-8bd3-74fcce9f3d1d",
+	"author":	"Antigravity",
+	"description":	{
+		"":	"A bridge to allow remote control of Fusion 360 over local HTTP"
+	},
+	"version":	"1.0.0",
+	"runOnStartup":	false,
+	"supportedOS":	"windows|mac",
+	"editEnabled":	true
+}
