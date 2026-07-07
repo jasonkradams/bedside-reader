@@ -209,7 +209,7 @@ class EnclosureBuilder:
             circles.addByCenterRadius(adsk.core.Point3D.create(sx+bx, sy+by, 0), 0.25)
 
         # Grille
-        gx_center, gy_center = 9.25, 2.9
+        gx_center, gy_center = 9.50, 2.9
         for i in [-1.2, -0.6, 0, 0.6, 1.2]:
             for j in [-1.2, -0.6, 0, 0.6, 1.2]:
                 if i**2 + j**2 <= 1.5:
@@ -324,7 +324,7 @@ class EnclosureBuilder:
         sk_bottom = self.root.sketches.add(bottom_plane)
         
         # Rotary Hole
-        sk_bottom.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(9.25, 2.0, 0), 0.35)
+        sk_bottom.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(9.50, 2.0, 0), 0.35)
         
         # USB Cable Hole (11.5mm x 7mm, centered at X=6.10, Z=-1.74)
         sk_bottom.sketchCurves.sketchLines.addCenterPointRectangle(
@@ -344,7 +344,7 @@ class EnclosureBuilder:
 
 
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
-        gx_center, gy_center = 9.25, 2.9
+        gx_center, gy_center = 9.50, 2.9
         sk_speaker = self.root.sketches.add(screen_plane)
         
         # 1. Main Speaker Box (Thickened to 2.0mm wall)
