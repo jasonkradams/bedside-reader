@@ -414,7 +414,7 @@ class EnclosureBuilder:
         holeCol = adsk.core.ObjectCollection.create()
         holeCol.add(sk_hole.profiles.item(0))
         holeExt = self.extrudes.createInput(holeCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        holeExt.setSymmetricExtent(adsk.core.ValueInput.createByReal(0.5), False) # 1cm total extrusion, easily piercing the 2mm wall
+        holeExt.setSymmetricExtent(adsk.core.ValueInput.createByReal(2.0), False) # 4cm total extrusion, guaranteed to pierce the left wall
         holeExt.participantBodies = [self.front_body]
         self.extrudes.add(holeExt)
 
