@@ -14,33 +14,21 @@ class AssemblyBuilder:
         return comp
 
     def _extrude_rect(self, comp, plane, cx, cy, w, h, depth, z_offset=0.0):
+        if z_offset != 0.0:
+            offInput = comp.constructionPlanes.createInput()
+            offInput.setByOffset(plane, adsk.core.ValueInput.createByReal(z_offset))
+            plane = comp.constructionPlanes.add(offInput)
+            
         sk = comp.sketches.add(plane)
         sk.sketchCurves.sketchLines.addCenterPointRectangle(
             adsk.core.Point3D.create(cx, cy, 0),
             adsk.core.Point3D.create(cx + w/2, cy + h/2, 0)
         )
         extInput = comp.features.extrudeFeatures.createInput(sk.profiles.item(0), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-        
-        if z_offset == 0.0:
-            extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth))
-        else:
-            # Create offset plane for starting the extrusion
-            offInput = comp.constructionPlanes.createInput()
-            offInput.setByOffset(plane, adsk.core.ValueInput.createByReal(z_offset))
-            offPlane = comp.constructionPlanes.add(offInput)
-            
-            sk2 = comp.sketches.add(offPlane)
-            sk2.sketchCurves.sketchLines.addCenterPointRectangle(
-                adsk.core.Point3D.create(cx, cy, 0),
-                adsk.core.Point3D.create(cx + w/2, cy + h/2, 0)
-            )
-            extInput2 = comp.features.extrudeFeatures.createInput(sk2.profiles.item(0), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-            extInput2.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth))
-            return comp.features.extrudeFeatures.add(extInput2)
-
+        extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth))
         return comp.features.extrudeFeatures.add(extInput)
 
-    def _extrude_cylinder(self, comp, plane, cx, cy, radius, depth, z_offset=0.0):
+    def _extrude_cylinder(self, comp, plane, cx, cy, radius, depth, z_offset=0.0, operation=adsk.fusion.FeatureOperations.NewBodyFeatureOperation):
         if z_offset != 0.0:
             offInput = comp.constructionPlanes.createInput()
             offInput.setByOffset(plane, adsk.core.ValueInput.createByReal(z_offset))
@@ -50,10 +38,12 @@ class AssemblyBuilder:
         sk.sketchCurves.sketchCircles.addByCenterRadius(
             adsk.core.Point3D.create(cx, cy, 0), radius
         )
-        extInput = comp.features.extrudeFeatures.createInput(sk.profiles.item(0), adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        extInput = comp.features.extrudeFeatures.createInput(sk.profiles.item(0), operation)
         extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth))
         return comp.features.extrudeFeatures.add(extInput)
 
+    def _cut_cylinder(self, comp, plane, cx, cy, radius, depth, z_offset=0.0):
+        return self._extrude_cylinder(comp, plane, cx, cy, radius, depth, z_offset, adsk.fusion.FeatureOperations.CutFeatureOperation)
 
     def build_main_stack(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Main_Compute_Stack", transform)
@@ -71,8 +61,14 @@ class AssemblyBuilder:
         # GPIO Header block joining them
         self._extrude_rect(comp, xy, 0, 1.0, 5.0, 0.5, 1.2, -1.2)
 
+        # Mounting Holes (4x M2.5, 58x23mm spacing -> 2.9cm and 1.15cm offsets)
+        for hx in [-2.9, 2.9]:
+            for hy in [-1.15, 1.15]:
+                # Cut through everything (Z: 0.5 to -1.5)
+                self._cut_cylinder(comp, xy, hx, hy, 0.125, -2.0, 0.5)
+
     def build_speaker(self, transform: adsk.core.Matrix3D):
-        comp = self.create_component("Speaker_CE32A-4", transform)
+        comp = self.create_component("Speaker_CE32A_4", transform)
         xy = comp.xYConstructionPlane
         
         # Square Base Frame
@@ -84,6 +80,12 @@ class AssemblyBuilder:
         # Magnet (Cylinder pointing backward)
         self._extrude_cylinder(comp, xy, 0, 0, 0.95, -0.95, 0.0)
 
+        # Mounting Holes (4x 2.0mm, ~26x26mm spacing -> 1.3cm offsets)
+        for hx in [-1.3, 1.3]:
+            for hy in [-1.3, 1.3]:
+                # Cut through the base frame
+                self._cut_cylinder(comp, xy, hx, hy, 0.1, -0.4, 0.2)
+
     def build_audio_amp(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Audio_Amp_MAX98357A", transform)
         xy = comp.xYConstructionPlane
@@ -94,21 +96,25 @@ class AssemblyBuilder:
         # Components bump
         self._extrude_rect(comp, xy, 0, 0, 1.5, 1.5, 0.1, 0.2)
 
+        # Mounting Holes (2x M2.5, 12mm spacing -> 0.6cm offsets)
+        for hx in [-0.6, 0.6]:
+            self._cut_cylinder(comp, xy, hx, 0, 0.125, -0.4, 0.2)
+
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
         xy = comp.xYConstructionPlane
         
-        # Base body
+        # Base body (Sits BEHIND the panel: Z=0 to Z=-0.6)
         self._extrude_rect(comp, xy, 0, 0, 1.2, 1.2, -0.6, 0.0)
         
-        # Threaded Neck
+        # Threaded Neck (Mounts THROUGH the panel: Z=0 to Z=0.5)
         self._extrude_cylinder(comp, xy, 0, 0, 0.35, 0.5, 0.0)
         
-        # Shaft
-        self._extrude_cylinder(comp, xy, 0, 0, 0.3, 1.5, 0.5)
+        # Shaft (Protrudes further: Z=0.5 to Z=1.5)
+        self._extrude_cylinder(comp, xy, 0, 0, 0.3, 1.0, 0.5)
         
-        # Knob (Optional, visually represents the top)
-        self._extrude_cylinder(comp, xy, 0, 0, 1.0, 1.5, 0.5)
+        # Knob (Optional, visually represents the top: Z=1.0 to Z=1.5)
+        self._extrude_cylinder(comp, xy, 0, 0, 1.0, 0.5, 1.0)
 
     def build_power_cable(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Power_Cable_Keepout", transform)
@@ -116,7 +122,6 @@ class AssemblyBuilder:
         
         # Plastic Plug body
         self._extrude_rect(comp, xy, 0, 0, 1.15, 0.7, 2.0, 0.0)
-
 
 def create_translation(x, y, z):
     mat = adsk.core.Matrix3D.create()
@@ -141,27 +146,27 @@ def run(context):
         mat_stack = create_translation(0, 0, 0)
         builder.build_main_stack(mat_stack)
 
-        # 2. Speaker (Placed tightly to the right of the screen)
-        # Main stack width is 6.55, so right edge is ~3.275
-        # Speaker width is 3.2, so its left edge is ~1.6
-        # Let's put speaker center at X = 3.275 + 1.6 + 0.2 (clearance) = 5.075
-        mat_speaker = create_translation(5.1, 0, 0)
+        # 2. Speaker (Placed horizontally next to the screen)
+        # Main stack extends to X=3.275. Speaker width is 3.2 (extends to X=1.6).
+        # We want a clean gap, say ~0.6cm (6mm).
+        # cx = 3.275 + 1.6 + 0.6 = 5.475 -> ~5.5
+        mat_speaker = create_translation(5.5, 0, 0)
         builder.build_speaker(mat_speaker)
 
-        # 3. Audio Amp (Placed behind the screen, slightly offset)
-        # Pi Zero is at Z = -1.2 to -1.4. Let's put Amp at Z = -1.6
-        mat_amp = create_translation(-1.5, 0, -1.6)
-        builder.build_audio_amp(mat_amp)
-
-        # 4. Rotary Encoder (Placed below the speaker, or to the right)
-        # If speaker is at X=5.1, Y=0
-        # Encoder can be at X=5.1, Y=-2.5
-        mat_encoder = create_translation(5.1, -2.5, -0.6)
+        # 3. Rotary Encoder (Placed horizontally next to the speaker)
+        # Speaker extends to X = 5.5 + 1.6 = 7.1.
+        # Encoder knob is 2.0 diameter (extends to X=1.0).
+        # Gap ~0.4cm.
+        # cx = 7.1 + 1.0 + 0.4 = 8.5
+        mat_encoder = create_translation(8.5, 0, 0)
         builder.build_encoder(mat_encoder)
 
+        # 4. Audio Amp (Placed behind the empty space between Screen and Speaker)
+        # Pi Zero is at Z = -1.2 to -1.4. Let's put Amp at Z = -1.5
+        mat_amp = create_translation(3.5, 0, -1.5)
+        builder.build_audio_amp(mat_amp)
+
         # 5. Power Cable Keepout (Plugged into Pi Zero at bottom)
-        # Pi Zero micro USB is roughly at X=1.0, Y=-1.5 (bottom edge)
-        # We need to make sure the cable clears
         mat_cable = create_translation(1.0, -1.5, -1.3)
         builder.build_power_cable(mat_cable)
 
@@ -169,4 +174,4 @@ def run(context):
 
     except Exception:
         if ui:
-            ui.messageBox('Failed:\\n{}'.format(traceback.format_exc()))
+            ui.messageBox('Failed:\n{}'.format(traceback.format_exc()))
