@@ -400,18 +400,18 @@ class EnclosureBuilder:
         lid_body = lid_feature.bodies.item(0)
         lid_body.name = "Speaker_Acoustic_Lid"
 
-        # 4. Full-Depth Wire Channel
-        sk_notch = self.root.sketches.add(screen_plane) # Start at back of front faceplate
-        sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(gx_center - 1.65, gy_center, 0), # Place notch on left edge
-            adsk.core.Point3D.create(gx_center - 1.65 + 0.25, gy_center + 0.15, 0)
-        )
-        notchCol = adsk.core.ObjectCollection.create()
-        notchCol.add(sk_notch.profiles.item(0))
-        notchExt = self.extrudes.createInput(notchCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-1.70)) # Cut 1.70cm deep to reach Z=-1.90
-        notchExt.participantBodies = [self.front_body, lid_body]
-        self.extrudes.add(notchExt)
+        # 4. Wire Hole in Lid
+        sk_hole = self.root.sketches.add(rebate_plane) # Start at lid plane Z=-1.85
+        # Move up 3mm (-0.3 in CAD Y) and place inside left wall (gx_center - 1.4)
+        sk_hole.sketchCurves.sketchCircles.addByCenterRadius(
+            adsk.core.Point3D.create(gx_center - 1.4, gy_center - 0.3, 0), 0.15
+        ) # 3mm diameter hole
+        holeCol = adsk.core.ObjectCollection.create()
+        holeCol.add(sk_hole.profiles.item(0))
+        holeExt = self.extrudes.createInput(holeCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        holeExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.15)) # Cut through the 1mm lid
+        holeExt.participantBodies = [lid_body]
+        self.extrudes.add(holeExt)
 
     def build_floor_mounts(self) -> None:
         pass
