@@ -153,8 +153,10 @@ def run(context):
         builder.build_main_stack(mat_stack)
 
         # 2. Speaker (Left face)
-        # Center at X = -3.0, Y = -0.5
-        mat_speaker = create_translation(-3.0, -0.5, 0)
+        # Flip 180 degrees around Y so the magnet faces the front, and recess it into the case to Z = -1.0
+        mat_speaker = adsk.core.Matrix3D.create()
+        mat_speaker.setToRotation(math.pi, adsk.core.Vector3D.create(0, 1, 0), adsk.core.Point3D.create(0,0,0))
+        mat_speaker.translation = adsk.core.Vector3D.create(-3.0, -0.5, -1.0)
         builder.build_speaker(mat_speaker)
 
         # 3. Rotary Encoder (Top left, pointing UP out the top of the box)
