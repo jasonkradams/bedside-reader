@@ -25,9 +25,9 @@ class AssemblyBuilder:
             extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth))
         else:
             # Create offset plane for starting the extrusion
-            offInput = comp.features.constructionPlanes.createInput()
+            offInput = comp.constructionPlanes.createInput()
             offInput.setByOffset(plane, adsk.core.ValueInput.createByReal(z_offset))
-            offPlane = comp.features.constructionPlanes.add(offInput)
+            offPlane = comp.constructionPlanes.add(offInput)
             
             sk2 = comp.sketches.add(offPlane)
             sk2.sketchCurves.sketchLines.addCenterPointRectangle(
@@ -42,9 +42,9 @@ class AssemblyBuilder:
 
     def _extrude_cylinder(self, comp, plane, cx, cy, radius, depth, z_offset=0.0):
         if z_offset != 0.0:
-            offInput = comp.features.constructionPlanes.createInput()
+            offInput = comp.constructionPlanes.createInput()
             offInput.setByOffset(plane, adsk.core.ValueInput.createByReal(z_offset))
-            plane = comp.features.constructionPlanes.add(offInput)
+            plane = comp.constructionPlanes.add(offInput)
             
         sk = comp.sketches.add(plane)
         sk.sketchCurves.sketchCircles.addByCenterRadius(
