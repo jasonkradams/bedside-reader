@@ -326,10 +326,10 @@ class EnclosureBuilder:
         # Rotary Hole
         sk_bottom.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(9.25, 2.0, 0), 0.35)
         
-        # USB Cable Hole (11.5mm x 7mm, centered at X=6.30, Z=-1.85)
+        # USB Cable Hole (11.5mm x 7mm, centered at X=6.10, Z=-1.74)
         sk_bottom.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(6.30, 1.85, 0),
-            adsk.core.Point3D.create(6.30 + 0.575, 1.85 + 0.35, 0)
+            adsk.core.Point3D.create(6.10, 1.74, 0),
+            adsk.core.Point3D.create(6.10 + 0.575, 1.74 + 0.35, 0)
         )
         
         bottomCol = adsk.core.ObjectCollection.create()
@@ -339,8 +339,8 @@ class EnclosureBuilder:
         bottomCut.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5))
         self.extrudes.add(bottomCut)
 
-        # Audio Amp Standoffs
-        self._create_standoffs(self.rear_body, rear_plane, 9.50, 2.0, 1.25, 0.0, 0.5)
+        # Audio Amp Standoffs (Top Left)
+        self._create_standoffs(self.rear_body, rear_plane, 1.80, 4.40, 1.25, 0.0, 0.5)
 
 
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
