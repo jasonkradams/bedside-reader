@@ -61,11 +61,11 @@ class AssemblyBuilder:
         # GPIO Header block joining them
         self._extrude_rect(comp, xy, 0, 1.0, 5.0, 0.5, 1.2, -1.2)
 
-        # Mounting Holes (4x M2.5, 58x23mm spacing -> 2.9cm and 1.15cm offsets)
+        # Mounting Holes (4x M2.5, typical Pi Zero spacing is 58x23mm)
+        # Cut from Z = -1.5 to Z = 0.5 (depth = 2.0, offset = -1.5)
         for hx in [-2.9, 2.9]:
             for hy in [-1.15, 1.15]:
-                # Cut through everything (Z: 0.5 to -1.5)
-                self._cut_cylinder(comp, xy, hx, hy, 0.125, -2.0, 0.5)
+                self._cut_cylinder(comp, xy, hx, hy, 0.125, 2.0, -1.5)
 
     def build_speaker(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Speaker_CE32A_4", transform)
@@ -81,10 +81,11 @@ class AssemblyBuilder:
         self._extrude_cylinder(comp, xy, 0, 0, 0.95, -0.95, 0.0)
 
         # Mounting Holes (4x 2.0mm, ~26x26mm spacing -> 1.3cm offsets)
-        for hx in [-1.3, 1.3]:
-            for hy in [-1.3, 1.3]:
-                # Cut through the base frame
-                self._cut_cylinder(comp, xy, hx, hy, 0.1, -0.4, 0.2)
+        # Mounting Holes (4x M3)
+        # Cut from Z = -0.1 to Z = 0.3 (depth = 0.4, offset = -0.1)
+        for hx in [-1.6, 1.6]:
+            for hy in [-1.6, 1.6]:
+                self._cut_cylinder(comp, xy, hx, hy, 0.15, 0.4, -0.1)
 
     def build_audio_amp(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Audio_Amp_MAX98357A", transform)
@@ -101,9 +102,9 @@ class AssemblyBuilder:
         self._extrude_rect(comp, xy, 0, 0.5, 0.8, 0.6, 0.6, 0.16)
 
         # 4. Mounting Holes (two M2.5 holes)
-        # Top left corner and middle right
-        self._cut_cylinder(comp, xy, -0.7, 0.6, 0.125, -0.1, 0.5)
-        self._cut_cylinder(comp, xy, 0.7, 0.0, 0.125, -0.1, 0.5)
+        # Cut from Z = -0.1 to Z = 0.5 (depth = 0.6, offset = -0.1)
+        self._cut_cylinder(comp, xy, -0.7, 0.6, 0.125, 0.6, -0.1)
+        self._cut_cylinder(comp, xy, 0.7, 0.0, 0.125, 0.6, -0.1)
 
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
