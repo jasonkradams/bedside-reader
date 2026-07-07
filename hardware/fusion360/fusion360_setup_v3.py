@@ -340,7 +340,7 @@ class EnclosureBuilder:
         self.extrudes.add(bottomCut)
 
         # Audio Amp Standoffs (Top Left)
-        self._create_standoffs(self.rear_body, rear_plane, 1.80, 4.40, 1.25, 0.0, 0.5)
+        self._create_standoffs(self.rear_body, rear_plane, 2.40, 4.40, 1.25, 0.0, 0.5)
 
 
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
