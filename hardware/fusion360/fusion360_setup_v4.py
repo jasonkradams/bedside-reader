@@ -87,18 +87,45 @@ class AssemblyBuilder:
                 self._cut_cylinder(comp, xy, hx, hy, 0.1, -0.4, 0.2)
 
     def build_audio_amp(self, transform: adsk.core.Matrix3D):
-        comp = self.create_component("Audio_Amp_MAX98357A", transform)
-        xy = comp.xYConstructionPlane
+        import urllib.request
+        import os
+        import tempfile
         
-        # PCB
-        self._extrude_rect(comp, xy, 0, 0, 1.94, 1.78, 0.2, 0.0)
+        step_url = 'https://raw.githubusercontent.com/adafruit/Adafruit_CAD_Parts/main/3006%20MAX98357/3006%20MAX98357.step'
+        step_url = step_url.replace(' ', '%20')
+        step_file = os.path.join(tempfile.gettempdir(), 'adafruit_3006.step')
         
-        # Components bump
-        self._extrude_rect(comp, xy, 0, 0, 1.5, 1.5, 0.1, 0.2)
-
-        # Mounting Holes (2x M2.5, 12mm spacing -> 0.6cm offsets)
-        for hx in [-0.6, 0.6]:
-            self._cut_cylinder(comp, xy, hx, 0, 0.125, -0.4, 0.2)
+        if not os.path.exists(step_file):
+            urllib.request.urlretrieve(step_url, step_file)
+            
+        importManager = self.app.importManager
+        stepOptions = importManager.createSTEPImportOptions(step_file)
+        stepOptions.isViewFit = False
+        
+        count_before = self.root.occurrences.count
+        importManager.importToTarget(stepOptions, self.root)
+        
+        if self.root.occurrences.count > count_before:
+            occ = self.root.occurrences.item(self.root.occurrences.count - 1)
+            occ.component.name = "Audio_Amp_MAX98357A"
+            
+            # Center the imported geometry
+            bbox = occ.boundingBox
+            cx = (bbox.maxPoint.x + bbox.minPoint.x) / 2
+            cy = (bbox.maxPoint.y + bbox.minPoint.y) / 2
+            cz = (bbox.maxPoint.z + bbox.minPoint.z) / 2
+            
+            t_center = adsk.core.Matrix3D.create()
+            t_center.translation = adsk.core.Vector3D.create(-cx, -cy, -cz)
+            
+            # Apply target transform
+            t_center.transformBy(transform)
+            occ.transform = t_center
+        else:
+            # Fallback if import fails
+            comp = self.create_component("Audio_Amp_MAX98357A", transform)
+            xy = comp.xYConstructionPlane
+            self._extrude_rect(comp, xy, 0, 0, 1.94, 1.78, 0.2, 0.0)
 
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
