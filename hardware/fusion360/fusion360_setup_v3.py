@@ -400,17 +400,22 @@ class EnclosureBuilder:
         lid_body = lid_feature.bodies.item(0)
         lid_body.name = "Speaker_Acoustic_Lid"
 
-        # 4. Wire Hole in Lid
-        sk_hole = self.root.sketches.add(rebate_plane) # Start at lid plane Z=-1.85
-        # Move up 3mm (-0.3 in CAD Y) and place inside left wall (gx_center - 1.4)
+        # 4. Wire Hole in Side Wall
+        side_input = self.planes.createInput()
+        side_input.setByOffset(self.root.yZConstructionPlane, adsk.core.ValueInput.createByReal(gx_center - 2.0))
+        side_plane = self.planes.add(side_input)
+        
+        sk_hole = self.root.sketches.add(side_plane)
+        # 3mm diameter hole, at world Z = -1.0, world Y = gy_center - 0.3
+        # YZ Plane local coords: sketch X = world Y, sketch Y = world Z
         sk_hole.sketchCurves.sketchCircles.addByCenterRadius(
-            adsk.core.Point3D.create(gx_center - 1.4, gy_center - 0.3, 0), 0.15
-        ) # 3mm diameter hole
+            adsk.core.Point3D.create(gy_center - 0.3, -1.0, 0), 0.15
+        )
         holeCol = adsk.core.ObjectCollection.create()
         holeCol.add(sk_hole.profiles.item(0))
         holeExt = self.extrudes.createInput(holeCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        holeExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.15)) # Cut through the 1mm lid
-        holeExt.participantBodies = [lid_body]
+        holeExt.setSymmetricExtent(adsk.core.ValueInput.createByReal(0.5), False) # 1cm total extrusion, easily piercing the 2mm wall
+        holeExt.participantBodies = [self.front_body]
         self.extrudes.add(holeExt)
 
     def build_floor_mounts(self) -> None:
