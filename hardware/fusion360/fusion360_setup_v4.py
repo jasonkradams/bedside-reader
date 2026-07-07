@@ -152,14 +152,19 @@ def run(context):
         mat_speaker = create_translation(-3.0, -0.5, 0)
         builder.build_speaker(mat_speaker)
 
-        # 3. Rotary Encoder (Top left, above speaker)
-        # Center at X = -3.0, Y = 2.5
-        mat_encoder = create_translation(-3.0, 2.5, 0)
+        # 3. Rotary Encoder (Top left, pointing UP out the top of the box)
+        # Rotate -90 degrees around X-axis so its local +Z (shaft) points to global +Y (up).
+        mat_encoder = adsk.core.Matrix3D.create()
+        mat_encoder.setToRotation(-math.pi / 2, adsk.core.Vector3D.create(1, 0, 0), adsk.core.Point3D.create(0,0,0))
+        # Place it above the speaker (X=-3.0), at the top edge of the box (Y=2.0), and centered in depth (Z=-1.5)
+        mat_encoder.translation = adsk.core.Vector3D.create(-3.0, 2.0, -1.5)
         builder.build_encoder(mat_encoder)
 
-        # 4. Audio Amp (Tucked in the empty space between encoder and top of screen)
-        # Center at X = 0.0, Y = 2.5, Z = -0.5
-        mat_amp = create_translation(0.0, 2.5, -0.5)
+        # 4. Audio Amp (Rotated 90 degrees and vertical against the back of the enclosure)
+        # We rotate 90 degrees around Z, and push it back to Z = -2.5.
+        mat_amp = adsk.core.Matrix3D.create()
+        mat_amp.setToRotation(math.pi / 2, adsk.core.Vector3D.create(0, 0, 1), adsk.core.Point3D.create(0,0,0))
+        mat_amp.translation = adsk.core.Vector3D.create(0.0, 0.5, -2.5)
         builder.build_audio_amp(mat_amp)
 
         # 5. Power Cable Keepout (Coming out the top of the Pi Zero)
