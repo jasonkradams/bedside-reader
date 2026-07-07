@@ -178,12 +178,12 @@ class EnclosureBuilder(AssemblyBuilder):
         xz_top = comp.constructionPlanes.add(offInput)
         
         sk_top = comp.sketches.add(xz_top)
-        # Encoder Hole
-        sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(-3.0, -1.5, 0), 0.4)
-        # Power Cable Hole
+        # Encoder Hole (Global Z = -1.5 -> Sketch Y = 1.5)
+        sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(-3.0, 1.5, 0), 0.4)
+        # Power Cable Hole (Global Z = -1.3 -> Sketch Y = 1.3)
         sk_top.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(3.5, -1.3, 0),
-            adsk.core.Point3D.create(3.5 + 0.6, -1.3 + 0.4, 0)
+            adsk.core.Point3D.create(3.5, 1.3, 0),
+            adsk.core.Point3D.create(3.5 + 0.6, 1.3 + 0.4, 0)
         )
         
         objs_top = adsk.core.ObjectCollection.create()
