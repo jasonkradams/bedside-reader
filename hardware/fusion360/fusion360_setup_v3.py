@@ -317,41 +317,31 @@ class EnclosureBuilder:
         tapInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(self.D - 0.5))
         self.extrudes.add(tapInput)
 
-        # Top Panel Cutouts
-        top_input = self.planes.createInput()
-        top_input.setByOffset(self.root.xZConstructionPlane, adsk.core.ValueInput.createByReal(self.H))
-        top_plane = self.planes.add(top_input)
-        sk_top = self.root.sketches.add(top_plane)
+        # Bottom Panel Cutouts
+        bottom_input = self.planes.createInput()
+        bottom_input.setByOffset(self.root.xZConstructionPlane, adsk.core.ValueInput.createByReal(0.0))
+        bottom_plane = self.planes.add(bottom_input)
+        sk_bottom = self.root.sketches.add(bottom_plane)
         
         # Rotary Hole
-        sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(9.25, 2.0, 0), 0.35)
+        sk_bottom.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(9.25, 2.0, 0), 0.35)
         
-        # Pi Zero Micro USB Hole (Accurate 6-point shape, 0.2mm clearance)
-        lines_top = sk_top.sketchCurves.sketchLines
-        p1 = adsk.core.Point3D.create(1.855, 3.03, 0) # Top Left
-        p2 = adsk.core.Point3D.create(2.645, 3.03, 0) # Top Right
-        p3 = adsk.core.Point3D.create(2.645, 3.13, 0) # Mid Right (Straight for 1mm)
-        p4 = adsk.core.Point3D.create(2.545, 3.37, 0) # Bottom Right (Beveled)
-        p5 = adsk.core.Point3D.create(1.955, 3.37, 0) # Bottom Left (Beveled)
-        p6 = adsk.core.Point3D.create(1.855, 3.13, 0) # Mid Left (Straight for 1mm)
-        lines_top.addByTwoPoints(p1, p2)
-        lines_top.addByTwoPoints(p2, p3)
-        lines_top.addByTwoPoints(p3, p4)
-        lines_top.addByTwoPoints(p4, p5)
-        lines_top.addByTwoPoints(p5, p6)
-        lines_top.addByTwoPoints(p6, p1)
-        topCol = adsk.core.ObjectCollection.create()
-        for p in sk_top.profiles:
-            topCol.add(p)
-        topCut = self.extrudes.createInput(topCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        topCut.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.5))
-        self.extrudes.add(topCut)
+        # USB Cable Hole (11.5mm x 7mm, centered at X=6.30, Z=-1.85)
+        sk_bottom.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(6.30, 1.85, 0),
+            adsk.core.Point3D.create(6.30 + 0.575, 1.85 + 0.35, 0)
+        )
+        
+        bottomCol = adsk.core.ObjectCollection.create()
+        for p in sk_bottom.profiles:
+            bottomCol.add(p)
+        bottomCut = self.extrudes.createInput(bottomCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        bottomCut.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5))
+        self.extrudes.add(bottomCut)
 
         # Audio Amp Standoffs
         self._create_standoffs(self.rear_body, rear_plane, 9.50, 2.0, 1.25, 0.0, 0.5)
 
-        # Pi Zero Standoffs
-        self._create_standoffs(self.rear_body, rear_plane, 4.40, 4.10, 5.8, 2.3, 0.5)
 
     def build_internal_acoustics(self, screen_plane: adsk.fusion.ConstructionPlane) -> None:
         gx_center, gy_center = 9.25, 2.9
