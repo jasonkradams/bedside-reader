@@ -142,32 +142,31 @@ def run(context):
 
         builder = AssemblyBuilder(root)
 
-        # 1. Main Stack (Origin)
-        mat_stack = create_translation(0, 0, 0)
+        # 1. Main Stack (Screen on the right)
+        # We will place its center at X = +2.5, Y = -0.5
+        mat_stack = create_translation(2.5, -0.5, 0)
         builder.build_main_stack(mat_stack)
 
-        # 2. Speaker (Placed horizontally next to the screen)
-        # Main stack extends to X=3.275. Speaker width is 3.2 (extends to X=1.6).
-        # We want a clean gap, say ~0.6cm (6mm).
-        # cx = 3.275 + 1.6 + 0.6 = 5.475 -> ~5.5
-        mat_speaker = create_translation(5.5, 0, 0)
+        # 2. Speaker (Left face)
+        # Center at X = -3.0, Y = -0.5
+        mat_speaker = create_translation(-3.0, -0.5, 0)
         builder.build_speaker(mat_speaker)
 
-        # 3. Rotary Encoder (Placed horizontally next to the speaker)
-        # Speaker extends to X = 5.5 + 1.6 = 7.1.
-        # Encoder knob is 2.0 diameter (extends to X=1.0).
-        # Gap ~0.4cm.
-        # cx = 7.1 + 1.0 + 0.4 = 8.5
-        mat_encoder = create_translation(8.5, 0, 0)
+        # 3. Rotary Encoder (Top left, above speaker)
+        # Center at X = -3.0, Y = 2.5
+        mat_encoder = create_translation(-3.0, 2.5, 0)
         builder.build_encoder(mat_encoder)
 
-        # 4. Audio Amp (Placed behind the empty space between Screen and Speaker)
-        # Pi Zero is at Z = -1.2 to -1.4. Let's put Amp at Z = -1.5
-        mat_amp = create_translation(3.5, 0, -1.5)
+        # 4. Audio Amp (Tucked in the empty space between encoder and top of screen)
+        # Center at X = 0.0, Y = 2.5, Z = -0.5
+        mat_amp = create_translation(0.0, 2.5, -0.5)
         builder.build_audio_amp(mat_amp)
 
-        # 5. Power Cable Keepout (Plugged into Pi Zero at bottom)
-        mat_cable = create_translation(1.0, -1.5, -1.3)
+        # 5. Power Cable Keepout (Coming out the top of the Pi Zero)
+        # If Pi stack is at Y = -0.5, its top edge is at Y = -0.5 + 1.75 = 1.25.
+        # We place the keepout at Y = 1.6 so it extends upwards from the top edge.
+        # X is offset to match the Pi Zero's USB port location (approx 1.0cm from center)
+        mat_cable = create_translation(3.5, 1.6, -1.3)
         builder.build_power_cable(mat_cable)
 
         app.activeViewport.fit()
