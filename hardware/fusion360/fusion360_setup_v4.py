@@ -102,13 +102,16 @@ class AssemblyBuilder:
         stepOptions = importManager.createSTEPImportOptions(step_file)
         stepOptions.isViewFit = False
         
-        count_before = self.root.occurrences.count
-        importManager.importToTarget(stepOptions, self.root)
+        # Create a container component with identity transform first
+        ident = adsk.core.Matrix3D.create()
+        occ = self.root.occurrences.addNewComponent(ident)
+        comp = occ.component
+        comp.name = "Audio_Amp_MAX98357A"
         
-        if self.root.occurrences.count > count_before:
-            occ = self.root.occurrences.item(self.root.occurrences.count - 1)
-            occ.component.name = "Audio_Amp_MAX98357A"
-            
+        # Import into the container
+        importManager.importToTarget(stepOptions, comp)
+        
+        if comp.occurrences.count > 0 or comp.bRepBodies.count > 0:
             # Center the imported geometry
             bbox = occ.boundingBox
             cx = (bbox.maxPoint.x + bbox.minPoint.x) / 2
@@ -126,9 +129,9 @@ class AssemblyBuilder:
             occ.transform = mat2
         else:
             # Fallback if import fails
-            comp = self.create_component("Audio_Amp_MAX98357A", transform)
             xy = comp.xYConstructionPlane
             self._extrude_rect(comp, xy, 0, 0, 1.94, 1.78, 0.2, 0.0)
+            occ.transform = transform
 
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
