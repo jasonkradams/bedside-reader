@@ -401,7 +401,7 @@ class EnclosureBuilder:
         lid_body.name = "Speaker_Acoustic_Lid"
 
         # 4. Full-Depth Wire Channel
-        sk_notch = self.root.sketches.add(self.root.xYConstructionPlane) # Start at front plane Z=0
+        sk_notch = self.root.sketches.add(screen_plane) # Start at back of front faceplate
         sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
             adsk.core.Point3D.create(gx_center - 1.65, gy_center, 0), # Place notch on left edge
             adsk.core.Point3D.create(gx_center - 1.65 + 0.25, gy_center + 0.15, 0)
@@ -409,7 +409,7 @@ class EnclosureBuilder:
         notchCol = adsk.core.ObjectCollection.create()
         notchCol.add(sk_notch.profiles.item(0))
         notchExt = self.extrudes.createInput(notchCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-1.90)) # Cut all the way through the box and lid
+        notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-1.70)) # Cut 1.70cm deep to reach Z=-1.90
         notchExt.participantBodies = [self.front_body, lid_body]
         self.extrudes.add(notchExt)
 
