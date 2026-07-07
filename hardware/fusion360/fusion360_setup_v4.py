@@ -118,9 +118,11 @@ class AssemblyBuilder:
             t_center = adsk.core.Matrix3D.create()
             t_center.translation = adsk.core.Vector3D.create(-cx, -cy, -cz)
             
-            # Apply target transform
-            t_center.transformBy(transform)
-            occ.transform = t_center
+            # Apply target transform: t_center MUST be applied first.
+            # final = transform * t_center
+            final_transform = transform.copy()
+            final_transform.transformBy(t_center)
+            occ.transform = final_transform
         else:
             # Fallback if import fails
             comp = self.create_component("Audio_Amp_MAX98357A", transform)
@@ -191,7 +193,8 @@ def run(context):
         # We rotate 90 degrees around Z, and push it back to Z = -2.5.
         mat_amp = adsk.core.Matrix3D.create()
         mat_amp.setToRotation(math.pi / 2, adsk.core.Vector3D.create(0, 0, 1), adsk.core.Point3D.create(0,0,0))
-        mat_amp.translation = adsk.core.Vector3D.create(0.0, 0.5, -2.5)
+        # Place it at X = -0.5 to safely clear the Pi stack, Y = 0.5, Z = -2.5
+        mat_amp.translation = adsk.core.Vector3D.create(-0.5, 0.5, -2.5)
         builder.build_audio_amp(mat_amp)
 
         # 5. Power Cable Keepout (Coming out the top of the Pi Zero)
