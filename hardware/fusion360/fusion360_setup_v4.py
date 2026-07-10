@@ -133,9 +133,6 @@ class AssemblyBuilder:
         
         # Shaft (Protrudes further: Z=0.5 to Z=1.5)
         self._extrude_cylinder(comp, xy, 0, 0, 0.3, 1.0, 0.5)
-        
-        # Knob (Optional, visually represents the top: Z=1.0 to Z=1.5)
-        self._extrude_cylinder(comp, xy, 0, 0, 1.0, 0.5, 1.0)
 
     def build_power_cable(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Power_Cable_Keepout", transform)
@@ -178,25 +175,28 @@ class EnclosureBuilder(AssemblyBuilder):
         
         # 1.5. Ergonomic Fillet
         vertCol = adsk.core.ObjectCollection.create()
-        horizCol = adsk.core.ObjectCollection.create()
         for edge in box_body.edges:
             p1 = edge.startVertex.geometry
             p2 = edge.endVertex.geometry
             if abs(p1.x - p2.x) < 1e-5 and abs(p1.y - p2.y) < 1e-5:
                 vertCol.add(edge)
-            else:
+                
+        if vertCol.count > 0:
+            filletInput1 = comp.features.filletFeatures.createInput()
+            filletInput1.addConstantRadiusEdgeSet(vertCol, adsk.core.ValueInput.createByReal(0.8), True)
+            comp.features.filletFeatures.add(filletInput1)
+            
+        horizCol = adsk.core.ObjectCollection.create()
+        for edge in box_body.edges:
+            p1 = edge.startVertex.geometry
+            p2 = edge.endVertex.geometry
+            if not (abs(p1.x - p2.x) < 1e-5 and abs(p1.y - p2.y) < 1e-5):
                 horizCol.add(edge)
                 
-        filletInput = comp.features.filletFeatures.createInput()
-        if vertCol.count > 0:
-            filletInput.addConstantRadiusEdgeSet(vertCol, adsk.core.ValueInput.createByReal(1.0), True)
         if horizCol.count > 0:
-            filletInput.addConstantRadiusEdgeSet(horizCol, adsk.core.ValueInput.createByReal(0.2), True)
-        filletInput.isG2 = False
-        try:
-            comp.features.filletFeatures.add(filletInput)
-        except:
-            pass
+            filletInput2 = comp.features.filletFeatures.createInput()
+            filletInput2.addConstantRadiusEdgeSet(horizCol, adsk.core.ValueInput.createByReal(0.2), True)
+            comp.features.filletFeatures.add(filletInput2)
         
         # 2. Shell it (2mm walls)
         objs = adsk.core.ObjectCollection.create()
@@ -250,6 +250,26 @@ class EnclosureBuilder(AssemblyBuilder):
                 
         # 4. Top/Rear Cutouts
         xz = comp.xZConstructionPlane
+        
+        # Bottom Face Cutout for Power (X=4.65, Z=-1.38)
+        offInputBot = comp.constructionPlanes.createInput()
+        offInputBot.setByOffset(xz, adsk.core.ValueInput.createByReal(-2.6))
+        xz_bottom = comp.constructionPlanes.add(offInputBot)
+        
+        sk_bottom = comp.sketches.add(xz_bottom)
+        sk_bottom.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(4.65, -1.38, 0),
+            adsk.core.Point3D.create(4.65 + 0.6, -1.38 + 0.3, 0)
+        )
+        objs_bot = adsk.core.ObjectCollection.create()
+        for i in range(sk_bottom.profiles.count):
+            objs_bot.add(sk_bottom.profiles.item(i))
+            
+        extInputBot = comp.features.extrudeFeatures.createInput(objs_bot, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        extInputBot.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5)) # Cut 5mm inwards (+Y)
+        # Assumes bodies named later
+        comp.features.extrudeFeatures.add(extInputBot)
+
         offInput = comp.constructionPlanes.createInput()
         offInput.setByOffset(xz, adsk.core.ValueInput.createByReal(2.0))
         xz_top = comp.constructionPlanes.add(offInput)
@@ -263,11 +283,9 @@ class EnclosureBuilder(AssemblyBuilder):
             objs_top.add(sk_top.profiles.item(i))
             
         extInput = comp.features.extrudeFeatures.createInput(objs_top, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(1.0))
+        extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-1.0))
         comp.features.extrudeFeatures.add(extInput)
         
-        # Power Cable Hole on Rear Panel (X=3.5, Y=1.0)
-        self._cut_rect(comp, xy, 3.5, 1.0, 1.2, 0.8, 0.4, -3.2)
         
         # 5. Component Standoffs
         # Pi Standoffs
