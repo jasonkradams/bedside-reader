@@ -11,7 +11,12 @@
   };
 
   outputs =
-    { self, nixpkgs, nixos-hardware, ... }:
+    {
+      self,
+      nixpkgs,
+      nixos-hardware,
+      ...
+    }:
     let
       systems = [
         "aarch64-darwin"
@@ -19,13 +24,10 @@
         "aarch64-linux"
         "x86_64-linux"
       ];
-      forAllSystems =
-        f: nixpkgs.lib.genAttrs systems (system: f system nixpkgs.legacyPackages.${system});
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system nixpkgs.legacyPackages.${system});
     in
     {
-      packages = forAllSystems (
-        _system: pkgs: pkgs.callPackage ./nix/packages.nix {}
-      );
+      packages = forAllSystems (_system: pkgs: pkgs.callPackage ./nix/packages.nix { });
 
       apps = forAllSystems (
         system: _pkgs: {
@@ -76,12 +78,12 @@
         bedside-reader = { ... }: {
           nixpkgs.hostPlatform = "aarch64-linux";
           deployment = {
-            targetHost = "10.136.117.83"; # Default IP, user can override in ~/.ssh/config or modify here
+            targetHost = "10.136.249.149"; # Default IP, user can override in ~/.ssh/config or modify here
             targetUser = "root";
             # Use cross-compilation or Docker if the deployment is initiated from macOS
             buildOnTarget = false;
           };
-          
+
           imports = [
             nixos-hardware.nixosModules.raspberry-pi-3
             ./system/configuration.nix

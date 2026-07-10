@@ -117,9 +117,9 @@ class AssemblyBuilder:
         self._extrude_rect(comp, xy, 0, 0.5, 0.8, 0.6, 0.6, 0.16)
 
         # 4. Mounting Holes (two M2.5 holes)
-        # Cut from Z = -0.1 to Z = 0.5 (depth = 0.6, offset = -0.1)
-        self._cut_cylinder(comp, xy, -0.7, 0.6, 0.125, 0.6, -0.1)
-        self._cut_cylinder(comp, xy, 0.7, 0.0, 0.125, 0.6, -0.1)
+        # Bottom left and bottom right
+        self._cut_cylinder(comp, xy, -0.7, -0.6, 0.125, -0.1, 0.5)
+        self._cut_cylinder(comp, xy, 0.7, -0.6, 0.125, -0.1, 0.5)
 
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
@@ -145,6 +145,29 @@ class AssemblyBuilder:
         self._extrude_rect(comp, xy, 0, 0, 1.15, 0.7, 2.0, 0.0)
 
 class EnclosureBuilder(AssemblyBuilder):
+    def _draw_rounded_rect(self, sketch, cx, cy, w, h, r):
+        arcs = sketch.sketchCurves.sketchArcs
+        lines = sketch.sketchCurves.sketchLines
+        dx = w/2 - r
+        dy = h/2 - r
+
+        c_tr = adsk.core.Point3D.create(cx+dx, cy+dy, 0)
+        a_tr = arcs.addByCenterStartSweep(c_tr, adsk.core.Point3D.create(cx+w/2, cy+dy, 0), math.pi/2)
+
+        c_tl = adsk.core.Point3D.create(cx-dx, cy+dy, 0)
+        a_tl = arcs.addByCenterStartSweep(c_tl, adsk.core.Point3D.create(cx-dx, cy+h/2, 0), math.pi/2)
+
+        c_bl = adsk.core.Point3D.create(cx-dx, cy-dy, 0)
+        a_bl = arcs.addByCenterStartSweep(c_bl, adsk.core.Point3D.create(cx-w/2, cy-dy, 0), math.pi/2)
+
+        c_br = adsk.core.Point3D.create(cx+dx, cy-dy, 0)
+        a_br = arcs.addByCenterStartSweep(c_br, adsk.core.Point3D.create(cx+dx, cy-h/2, 0), math.pi/2)
+
+        lines.addByTwoPoints(a_tr.endSketchPoint, a_tl.startSketchPoint)
+        lines.addByTwoPoints(a_tl.endSketchPoint, a_bl.startSketchPoint)
+        lines.addByTwoPoints(a_bl.endSketchPoint, a_br.startSketchPoint)
+        lines.addByTwoPoints(a_br.endSketchPoint, a_tr.startSketchPoint)
+
     def build_enclosure(self):
         comp = self.create_component("Outer_Enclosure", adsk.core.Matrix3D.create())
         xy = comp.xYConstructionPlane
@@ -152,6 +175,28 @@ class EnclosureBuilder(AssemblyBuilder):
         # 1. Solid Bounding Box
         box_feature = self._extrude_rect(comp, xy, 0.25, 0.0, 11.5, 5.0, 3.2, -3.0)
         box_body = box_feature.bodies.item(0)
+        
+        # 1.5. Ergonomic Fillet
+        vertCol = adsk.core.ObjectCollection.create()
+        horizCol = adsk.core.ObjectCollection.create()
+        for edge in box_body.edges:
+            p1 = edge.startVertex.geometry
+            p2 = edge.endVertex.geometry
+            if abs(p1.x - p2.x) < 1e-5 and abs(p1.y - p2.y) < 1e-5:
+                vertCol.add(edge)
+            else:
+                horizCol.add(edge)
+                
+        filletInput = comp.features.filletFeatures.createInput()
+        if vertCol.count > 0:
+            filletInput.addConstantRadiusEdgeSet(vertCol, adsk.core.ValueInput.createByReal(1.0), True)
+        if horizCol.count > 0:
+            filletInput.addConstantRadiusEdgeSet(horizCol, adsk.core.ValueInput.createByReal(0.2), True)
+        filletInput.isG2 = False
+        try:
+            comp.features.filletFeatures.add(filletInput)
+        except:
+            pass
         
         # 2. Shell it (2mm walls)
         objs = adsk.core.ObjectCollection.create()
@@ -164,14 +209,46 @@ class EnclosureBuilder(AssemblyBuilder):
         # Screen (4.3 x 3.3 to give 1mm clearance)
         self._cut_rect(comp, xy, 2.5, -0.5, 4.3, 3.3, 0.4, 0.0)
         
-        # Speaker Grill (Grid of 2mm holes)
-        for i in range(-2, 3):
-            for j in range(-2, 3):
-                hx = -3.0 + i * 0.5
-                hy = -0.5 + j * 0.5
-                self._cut_cylinder(comp, xy, hx, hy, 0.1, 0.4, 0.0)
+        # Speaker Grill (Diamond grid of holes)
+        gx, gy = -3.0, -0.5
+        for i in [-1.2, -0.6, 0, 0.6, 1.2]:
+            for j in [-1.2, -0.6, 0, 0.6, 1.2]:
+                if i**2 + j**2 <= 1.5:
+                    self._cut_cylinder(comp, xy, gx + i, gy + j, 0.15, 0.4, 0.0)
+                    
+        # Screen Buttons & Plungers
+        sx, sy = 2.5, -0.5
+        button_coords = [(-2.6, 0.6), (-2.6, -0.5), (2.6, 0.6), (2.6, -0.5)]
+        
+        for bx, by in button_coords:
+            self._cut_cylinder(comp, xy, sx+bx, sy+by, 0.25, 0.4, 0.0)
+            
+        sk_bridge = comp.sketches.add(xy)
+        for bx, by in button_coords:
+            cx, cy = sx+bx, sy+by
+            dx = -0.25 if bx < 0 else 0.25
+            sk_bridge.sketchCurves.sketchLines.addTwoPointRectangle(
+                adsk.core.Point3D.create(cx + dx, cy - 0.05, 0),
+                adsk.core.Point3D.create(cx, cy + 0.05, 0)
+            )
+        brCol = adsk.core.ObjectCollection.create()
+        for p in sk_bridge.profiles:
+            brCol.add(p)
+        brExt = comp.features.extrudeFeatures.createInput(brCol, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        brExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.06)) # 0.6mm thin flexure
+        comp.features.extrudeFeatures.add(brExt)
+        
+        sk_plunger = comp.sketches.add(xy)
+        for bx, by in button_coords:
+            sk_plunger.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(sx+bx, sy+by, 0), 0.15)
+        plCol = adsk.core.ObjectCollection.create()
+        for p in sk_plunger.profiles:
+            plCol.add(p)
+        plExt = comp.features.extrudeFeatures.createInput(plCol, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        plExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.17)) # 1.7mm thick plunger
+        comp.features.extrudeFeatures.add(plExt)
                 
-        # 4. Top Cutouts (XZ Plane)
+        # 4. Top/Rear Cutouts
         xz = comp.xZConstructionPlane
         offInput = comp.constructionPlanes.createInput()
         offInput.setByOffset(xz, adsk.core.ValueInput.createByReal(2.0))
@@ -180,11 +257,6 @@ class EnclosureBuilder(AssemblyBuilder):
         sk_top = comp.sketches.add(xz_top)
         # Encoder Hole (Global Z = -1.5 -> Sketch Y = 1.5)
         sk_top.sketchCurves.sketchCircles.addByCenterRadius(adsk.core.Point3D.create(-3.0, 1.5, 0), 0.4)
-        # Power Cable Hole (Global Z = -1.3 -> Sketch Y = 1.3)
-        sk_top.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(3.5, 1.3, 0),
-            adsk.core.Point3D.create(3.5 + 0.6, 1.3 + 0.4, 0)
-        )
         
         objs_top = adsk.core.ObjectCollection.create()
         for i in range(sk_top.profiles.count):
@@ -193,6 +265,9 @@ class EnclosureBuilder(AssemblyBuilder):
         extInput = comp.features.extrudeFeatures.createInput(objs_top, adsk.fusion.FeatureOperations.CutFeatureOperation)
         extInput.setDistanceExtent(False, adsk.core.ValueInput.createByReal(1.0))
         comp.features.extrudeFeatures.add(extInput)
+        
+        # Power Cable Hole on Rear Panel (X=3.5, Y=1.0)
+        self._cut_rect(comp, xy, 3.5, 1.0, 1.2, 0.8, 0.4, -3.2)
         
         # 5. Component Standoffs
         # Pi Standoffs
@@ -208,10 +283,111 @@ class EnclosureBuilder(AssemblyBuilder):
                 self._cut_cylinder(comp, xy, hx, hy, 0.1, -1.0, 0.0)
                 
         # Audio Amp Standoffs
-        pts = [ (2.5 - 0.7, -0.5 + 0.6), (2.5 + 0.7, -0.5 + 0.0) ]
+        pts = [ (2.5 - 0.7, -0.5 - 0.6), (2.5 + 0.7, -0.5 - 0.6) ]
         for px, py in pts:
             self._extrude_cylinder(comp, xy, px, py, 0.25, 0.3, -2.8, adsk.fusion.FeatureOperations.JoinFeatureOperation)
             self._cut_cylinder(comp, xy, px, py, 0.1, 0.3, -2.8)
+            
+        # 6. Speaker Acoustic Box
+        lid_input = comp.constructionPlanes.createInput()
+        lid_input.setByOffset(xy, adsk.core.ValueInput.createByReal(-1.8))
+        lid_plane = comp.constructionPlanes.add(lid_input)
+        
+        sk_lid = comp.sketches.add(lid_plane)
+        sk_lid.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.75, gy + 1.75, 0)
+        )
+        lCol = adsk.core.ObjectCollection.create()
+        lCol.add(sk_lid.profiles.item(0))
+        lidExt = comp.features.extrudeFeatures.createInput(lCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        lidExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.2)) # Towards +Z
+        lid_feature = comp.features.extrudeFeatures.add(lidExt)
+        lid_body = lid_feature.bodies.item(0)
+        lid_body.name = "Speaker_Acoustic_Lid"
+        
+        sk_lip = comp.sketches.add(lid_plane)
+        sk_lip.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.58, gy + 1.58, 0)
+        )
+        sk_lip.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.4, gy + 1.4, 0)
+        )
+        lipCol = adsk.core.ObjectCollection.create()
+        for p in sk_lip.profiles:
+            if p.profileLoops.count > 1:
+                lipCol.add(p)
+        lipExt = comp.features.extrudeFeatures.createInput(lipCol, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        lipExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(1.8)) # Hit front wall
+        lipExt.participantBodies = [lid_body]
+        comp.features.extrudeFeatures.add(lipExt)
+        
+        sk_notch = comp.sketches.add(lid_plane)
+        sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
+            adsk.core.Point3D.create(gx - 1.575, gy, 0),
+            adsk.core.Point3D.create(gx - 1.575 + 0.25, gy + 0.15, 0)
+        )
+        notchCol = adsk.core.ObjectCollection.create()
+        notchCol.add(sk_notch.profiles.item(0))
+        notchExt = comp.features.extrudeFeatures.createInput(notchCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
+        notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5))
+        notchExt.participantBodies = [lid_body]
+        comp.features.extrudeFeatures.add(notchExt)
+        
+        # 7. Split Case and Create Lap Joint
+        main_body = None
+        for b in comp.bRepBodies:
+            if b.name != "Speaker_Acoustic_Lid":
+                main_body = b
+                break
+                
+        if main_body:
+            planeInput = comp.constructionPlanes.createInput()
+            planeInput.setByOffset(xy, adsk.core.ValueInput.createByReal(-1.2))
+            splitPlane = comp.constructionPlanes.add(planeInput)
+
+            splitInput = comp.features.splitBodyFeatures.createInput(main_body, splitPlane, True)
+            comp.features.splitBodyFeatures.add(splitInput)
+            
+            front_body = None
+            rear_body = None
+            for b in comp.bRepBodies:
+                if b.name != "Speaker_Acoustic_Lid":
+                    if b.physicalProperties.centerOfMass.z > -1.2:
+                        front_body = b
+                    else:
+                        rear_body = b
+                        
+            if front_body and rear_body:
+                front_body.name = "Front_Faceplate"
+                rear_body.name = "Rear_Bucket"
+                
+                # Build lap joint
+                sk_lip = comp.sketches.add(splitPlane)
+                self._draw_rounded_rect(sk_lip, 0.25, 0.0, 11.1, 4.6, 0.8)
+                self._draw_rounded_rect(sk_lip, 0.25, 0.0, 10.7, 4.2, 0.6)
+                
+                lipCol = adsk.core.ObjectCollection.create()
+                for p in sk_lip.profiles:
+                    if p.profileLoops.count > 1:
+                        lipCol.add(p)
+                        
+                lipExt = comp.features.extrudeFeatures.createInput(lipCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+                lipExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.2)) # extrude towards +Z
+                lipFeature = comp.features.extrudeFeatures.add(lipExt)
+                
+                lip_bodies = adsk.core.ObjectCollection.create()
+                for b in lipFeature.bodies:
+                    lip_bodies.add(b)
+                    
+                combJoin = comp.features.combineFeatures.createInput(rear_body, lip_bodies)
+                combJoin.operation = adsk.fusion.FeatureOperations.JoinFeatureOperation
+                comp.features.combineFeatures.add(combJoin)
+                
+                combCut = comp.features.combineFeatures.createInput(front_body, adsk.core.ObjectCollection.create())
+                combCut.toolBodies.add(rear_body)
+                combCut.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
+                combCut.isKeepToolBodies = True
+                comp.features.combineFeatures.add(combCut)
 
 def create_translation(x, y, z):
     mat = adsk.core.Matrix3D.create()
@@ -258,14 +434,7 @@ def run(context):
         mat_amp.translation = adsk.core.Vector3D.create(2.5, -0.5, -2.5)
         builder.build_audio_amp(mat_amp)
 
-        # 5. Power Cable Keepout (Coming out the top of the Pi Zero)
-        # If Pi stack is at Y = -0.5, its top edge is at Y = -0.5 + 1.75 = 1.25.
-        # We place the keepout at Y = 1.6 so it extends upwards from the top edge.
-        # X is offset to match the Pi Zero's USB port location (approx 1.0cm from center)
-        mat_cable = create_translation(3.5, 1.6, -1.3)
-        builder.build_power_cable(mat_cable)
-
-        # 6. Generate the Outer Enclosure Shell
+        # 5. Generate the Outer Enclosure Shell
         enclosure_builder = EnclosureBuilder(root)
         enclosure_builder.build_enclosure()
 

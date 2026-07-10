@@ -93,8 +93,6 @@ let
     '';
   };
 
-
-
   # Override Go to 1.26.4 since Nixpkgs stable/unstable hasn't updated yet.
   # We fetch the exact source tarball from go.dev and override the package.
   go_1_26_4 = pkgs.go.overrideAttrs (_old: {
@@ -108,15 +106,16 @@ let
   # Re-bind buildGoModule to use our custom Go version
   buildGoModule_1_26_4 = pkgs.buildGoModule.override { go = go_1_26_4; };
 
-
-
   # Bedside App Go Binary
   bedside-app = buildGoModule_1_26_4 {
     pname = "bedside-app";
     version = "1.0.0";
     src = ../app; # Adjust path relative to this file
     vendorHash = "sha256-jJLJ/WK+YHIcg+N+Jvp6v6RHQxw/XxvXL5MIQbarZns=";
-    ldflags = [ "-s" "-w" ]; # strip DWARF + symbol table (image-size lever)
+    ldflags = [
+      "-s"
+      "-w"
+    ]; # strip DWARF + symbol table (image-size lever)
   };
 
   # Script to build the NixOS SD card image natively via Docker / Rancher Desktop / OrbStack
@@ -124,13 +123,13 @@ let
     name = "build-os";
     text = ''
       echo "Building NixOS SD Card Image for AArch64 using Docker native Virtualization.framework..."
-      
+
       # We use Docker to evaluate and build the NixOS image natively on the Linux VM.
       # This entirely bypasses the flaky macOS Nix daemon and QEMU HVF bugs.
-      
+
       # Create a persistent volume for the Nix store so subsequent builds are fast
       docker volume create nixos-builder-store >/dev/null || true
-      
+
       echo "Starting builder container (this may take a while to download/compile)..."
       docker run --rm \
         -v "$PWD":/workspace \
@@ -139,23 +138,23 @@ let
         nixos/nix:latest \
         bash -c "
           set -e
-          
+
           # Run safe garbage collection. This removes old temporary files but strictly preserves
           # the base image (via its own roots) and our previous build's dependencies
           # (via the bedside-reader-latest root we create below).
           echo 'Cleaning up orphaned cache to prevent out-of-space errors...'
           nix-collect-garbage >/dev/null 2>&1 || true
-          
+
           echo 'Building image...'
           nix build --out-link /nix/var/nix/gcroots/bedside-reader-latest --extra-experimental-features 'nix-command flakes' .#nixosConfigurations.bedside-reader.config.system.build.sdImage
-          
+
           echo 'Copying image out of container...'
           mkdir -p result-img
           rm -rf result-img/*.img*
           cp -L /nix/var/nix/gcroots/bedside-reader-latest/sd-image/*.img* result-img/
           chmod 644 result-img/*.img*
         "
-      
+
       echo "Done! Image is located at: ./result-img/"
     '';
   };
@@ -170,13 +169,13 @@ let
         echo "Scanning for physical disks..."
         # Find all physical disks except disk0 (main OS drive)
         mapfile -t DISKS < <(diskutil list | awk '/^\/dev\/disk[0-9]+ .*physical/ {print $1}' | grep -v '^/dev/disk0$')
-        
+
         if [ ''${#DISKS[@]} -eq 0 ]; then
           echo "Error: No removable or external physical disks found!"
           echo "Please plug in your SD card."
           exit 1
         fi
-        
+
         OPTIONS=()
         for d in "''${DISKS[@]}"; do
           SIZE=$(diskutil info "$d" | awk -F': +' '/Disk Size/ {print $2}' | cut -d'(' -f1 | xargs)
@@ -186,7 +185,7 @@ let
           fi
           OPTIONS+=("$d - $NAME ($SIZE)")
         done
-        
+
         echo "Please select the target SD card to flash:"
         select opt in "''${OPTIONS[@]}" "Cancel"; do
           if [ "$opt" = "Cancel" ]; then
@@ -200,7 +199,7 @@ let
           fi
         done
       fi
-      
+
       IMG=$(find result-img -name "nixos-image-*.img.zst" 2>/dev/null | head -n 1 || true)
       if [ -z "$IMG" ]; then
         echo "Error: No compressed image found in result-img/ directory."
@@ -262,19 +261,19 @@ let
     name = "deploy-os";
     text = ''
       echo "Deploying updates to Pi natively via Docker Virtualization.framework..."
-      
+
       # Generate a temporary SSH key for Docker to use
       rm -rf .tmp-ssh
       mkdir -p .tmp-ssh
       ssh-keygen -t ed25519 -f .tmp-ssh/id_ed25519 -N "" -q
-      
+
       # Authorize it on the Pi using macOS native SSH (which uses your agent/config)
       echo "Authorizing temporary Docker SSH key on the Pi..."
-      cat .tmp-ssh/id_ed25519.pub | ssh root@10.136.117.83 "mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys"
-      
+      cat .tmp-ssh/id_ed25519.pub | ssh root@10.136.249.149 "mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys"
+
       # Create a persistent volume for the Nix store so subsequent builds are fast
       docker volume create nixos-builder-store >/dev/null || true
-      
+
       echo "Starting builder container..."
       docker run --rm \
         -v "$PWD":/workspace \
@@ -295,12 +294,12 @@ let
           mkdir -p /root/.ssh
           cp /tmp/ssh/id_ed25519 /root/.ssh/
           chmod 600 /root/.ssh/id_ed25519
-          
+
           echo 'Host *' > /root/.ssh/config
           echo '  StrictHostKeyChecking accept-new' >> /root/.ssh/config
           echo '  IdentityFile /root/.ssh/id_ed25519' >> /root/.ssh/config
           chmod 600 /root/.ssh/config
-          
+
           # NOTE: intentionally no nix-collect-garbage here. It deleted the RPi
           # kernel from the persistent volume on every run, forcing a ~20min kernel
           # rebuild each deploy. The volume persists across deploys; if it ever grows
@@ -309,7 +308,7 @@ let
           echo 'Running colmena apply...'
           nix run --extra-experimental-features 'nix-command flakes' nixpkgs#colmena apply
         "
-        
+
       # Cleanup
       rm -rf .tmp-ssh
       echo "Done!"
