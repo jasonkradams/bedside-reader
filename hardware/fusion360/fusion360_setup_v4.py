@@ -375,12 +375,8 @@ class EnclosureBuilder(AssemblyBuilder):
                 # 7. Speaker Acoustic Box (Joined to Front Faceplate)
                 gx, gy = -3.0, -0.5
                 sk_walls = comp.sketches.add(xy)
-                sk_walls.sketchCurves.sketchLines.addCenterPointRectangle(
-                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 2.0, gy + 2.0, 0)
-                )
-                sk_walls.sketchCurves.sketchLines.addCenterPointRectangle(
-                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.8, gy + 1.8, 0)
-                )
+                self._draw_rounded_rect(sk_walls, gx, gy, 4.0, 4.0, 0.5)
+                self._draw_rounded_rect(sk_walls, gx, gy, 3.6, 3.6, 0.3)
                 wallCol = adsk.core.ObjectCollection.create()
                 for p in sk_walls.profiles:
                     if p.profileLoops.count > 1:
@@ -396,9 +392,7 @@ class EnclosureBuilder(AssemblyBuilder):
                 lid_plane = comp.constructionPlanes.add(lid_input)
 
                 sk_lid = comp.sketches.add(lid_plane)
-                sk_lid.sketchCurves.sketchLines.addCenterPointRectangle(
-                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 2.0, gy + 2.0, 0)
-                )
+                self._draw_rounded_rect(sk_lid, gx, gy, 4.0, 4.0, 0.5)
                 lCol = adsk.core.ObjectCollection.create()
                 lCol.add(sk_lid.profiles.item(0))
                 lidExt = comp.features.extrudeFeatures.createInput(lCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
@@ -409,12 +403,8 @@ class EnclosureBuilder(AssemblyBuilder):
 
                 # Acoustic Lip
                 sk_lip_spk = comp.sketches.add(lid_plane)
-                sk_lip_spk.sketchCurves.sketchLines.addCenterPointRectangle(
-                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.8, gy + 1.8, 0)
-                )
-                sk_lip_spk.sketchCurves.sketchLines.addCenterPointRectangle(
-                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.6, gy + 1.6, 0)
-                )
+                self._draw_rounded_rect(sk_lip_spk, gx, gy, 3.6, 3.6, 0.3)
+                self._draw_rounded_rect(sk_lip_spk, gx, gy, 3.2, 3.2, 0.1)
                 lipColSpk = adsk.core.ObjectCollection.create()
                 for p in sk_lip_spk.profiles:
                     if p.profileLoops.count > 1:
