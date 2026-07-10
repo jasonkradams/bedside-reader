@@ -97,6 +97,11 @@ func (a *App) resetScreen(wake bool) bool {
 	if wake {
 		a.screenOff = false
 		display.SetBacklight(true)
+		if wasOff {
+			// Coming back from a blanked screen: redraw immediately so the panel
+			// shows current state rather than whatever frame was left when it slept.
+			a.refreshDisplay()
+		}
 	}
 
 	if a.screenTimer != nil {
@@ -116,6 +121,14 @@ func (a *App) publishMenu() {
 		Books:  a.menuBooks,
 		Index:  a.menuIndex,
 	})
+}
+
+// refreshDisplay re-publishes current state so the UI redraws immediately, e.g.
+// when the screen wakes from a blanked idle and must not show a stale frame.
+func (a *App) refreshDisplay() {
+	a.gui.SetEncoderMode(a.encoderMode)
+	a.bus.Publish(bus.EventPlayerStateChanged, a.player.State)
+	a.publishMenu()
 }
 
 func (a *App) handlePlayPause() {

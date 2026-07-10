@@ -39,12 +39,13 @@ var (
 )
 
 type Renderer struct {
-	bus    *bus.Bus
-	lib    *library.Manager
-	fbFile *os.File
-	mmap   []byte
-	canvas *image.RGBA
-	mu     sync.Mutex
+	bus       *bus.Bus
+	lib       *library.Manager
+	fbFile    *os.File
+	frame     []byte // RGB565 frame buffer, written to the panel each render
+	canvas    *image.RGBA
+	renderReq chan struct{} // coalesced render requests
+	mu        sync.Mutex
 
 	// Local state
 	playState     player.PlaybackState
@@ -117,7 +118,7 @@ func readTrim(path string) string {
 }
 
 func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
-	fbPath, err := panelFramebuffer()
+	fbPath, err := waitForPanelFramebuffer(20 * time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to locate panel framebuffer: %w", err)
 	}
@@ -126,14 +127,6 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 	fbFile, err := os.OpenFile(fbPath, os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open %s: %w", fbPath, err)
-	}
-
-	// Memory map the framebuffer (320x240, 16-bit color = 153600 bytes)
-	fbSize := panelWidth * panelHeight * 2
-	mmap, err := unix.Mmap(int(fbFile.Fd()), 0, fbSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		fbFile.Close()
-		return nil, fmt.Errorf("failed to mmap framebuffer: %w", err)
 	}
 
 	// Unblank the framebuffer
@@ -146,24 +139,42 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 	display.SetBacklight(true)
 
 	r := &Renderer{
-		bus:    eventBus,
-		lib:    lib,
-		fbFile: fbFile,
-		mmap:   mmap,
-		canvas: image.NewRGBA(image.Rect(0, 0, panelWidth, panelHeight)),
+		bus:       eventBus,
+		lib:       lib,
+		fbFile:    fbFile,
+		frame:     make([]byte, panelWidth*panelHeight*2),
+		canvas:    image.NewRGBA(image.Rect(0, 0, panelWidth, panelHeight)),
+		renderReq: make(chan struct{}, 1),
 	}
 
+	go r.renderLoop()
 	go r.listen()
 	go r.pollWiFi()
-	r.render() // initial render
+	go r.periodicRefresh()
+	r.requestRender() // initial render
 
 	return r, nil
 }
 
-func (r *Renderer) Close() {
-	if r.mmap != nil {
-		unix.Munmap(r.mmap)
+// waitForPanelFramebuffer polls for the panel's framebuffer for up to timeout.
+// On this board the SPI panel driver can probe a second or two after the app
+// starts, so retrying (rather than failing fast) avoids a boot-time crash-restart
+// loop when systemd starts the service before /dev/fbN for the panel exists.
+func waitForPanelFramebuffer(timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		fbPath, err := panelFramebuffer()
+		if err == nil {
+			return fbPath, nil
+		}
+		if time.Now().After(deadline) {
+			return "", err
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+func (r *Renderer) Close() {
 	if r.fbFile != nil {
 		r.fbFile.Close()
 	}
@@ -183,10 +194,42 @@ func (r *Renderer) pollWiFi() {
 		r.mu.Unlock()
 
 		if changed {
-			r.render()
+			r.requestRender()
 		}
 
 		time.Sleep(2 * time.Second)
+	}
+}
+
+// requestRender asks the render loop to redraw. It coalesces: many requests
+// between frames collapse into one, decoupling the bursty event rate from the
+// bounded panel refresh rate.
+func (r *Renderer) requestRender() {
+	select {
+	case r.renderReq <- struct{}{}:
+	default:
+	}
+}
+
+// renderLoop serializes rendering and caps the refresh rate. After each frame it
+// sleeps briefly; requests that arrive during the sleep coalesce into the next
+// frame, so a storm of progress ticks can't saturate the SPI bus or the CPU.
+func (r *Renderer) renderLoop() {
+	const minInterval = 66 * time.Millisecond // ~15 fps ceiling
+	for range r.renderReq {
+		r.render()
+		time.Sleep(minInterval)
+	}
+}
+
+// periodicRefresh redraws at a slow cadence even when nothing changed, so the
+// panel self-heals any SPI glitch and always reflects current state (for example
+// after the screen wakes from a blanked idle).
+func (r *Renderer) periodicRefresh() {
+	ticker := time.NewTicker(1500 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		r.requestRender()
 	}
 }
 
@@ -208,7 +251,7 @@ func (r *Renderer) listen() {
 		}
 
 		if needsRender {
-			r.render()
+			r.requestRender()
 		}
 	}
 }
@@ -231,10 +274,32 @@ func (r *Renderer) render() {
 	if r.menuState.Active {
 		r.renderMenu()
 	}
-	r.drawWiFiIcon(300, 10, r.wifiConnected)
+	// Wi-Fi status sits in the bottom-right corner (see bug 5) so it no longer
+	// consumes a full row at the top of the screen.
+	r.drawWiFiIcon(300, 193, r.wifiConnected)
 
-	// Copy to hardware
-	copyToRGB565(r.mmap, r.canvas)
+	// Push the frame to the panel.
+	copyToRGB565(r.frame, r.canvas)
+	r.flush()
+}
+
+// flush writes the RGB565 frame to the panel framebuffer. Going through the
+// fbdev write path (instead of a shared mmap) makes the panel driver treat the
+// whole frame as damaged and push it over SPI every time — so a glitched or
+// partially-updated region heals on the next render, instead of leaving the
+// permanent stale bands that stale mmap dirty-tracking produced over time.
+func (r *Renderer) flush() {
+	for off := 0; off < len(r.frame); {
+		n, err := r.fbFile.WriteAt(r.frame[off:], int64(off))
+		if err != nil {
+			log.Printf("framebuffer write failed at offset %d: %v", off, err)
+			return
+		}
+		if n <= 0 {
+			return
+		}
+		off += n
+	}
 }
 
 // Menu layout geometry, in pixels.
@@ -365,7 +430,19 @@ func (r *Renderer) renderPlayer() {
 		return
 	}
 	r.drawChapterProgress(chapter)
-	r.drawTimes(chapter)
+	r.drawTimes(chapter, r.bookDuration(book))
+}
+
+// bookDuration returns the whole-book length, preferring mpv's live stream
+// duration and falling back to the library metadata when mpv hasn't reported it.
+func (r *Renderer) bookDuration(book *library.Audiobook) float64 {
+	if r.playState.Duration > 0 {
+		return r.playState.Duration
+	}
+	if book != nil {
+		return book.Duration
+	}
+	return 0
 }
 
 // currentBook returns the library metadata for the loaded file, or nil when
@@ -422,8 +499,67 @@ func (r *Renderer) displayTitle(book *library.Audiobook) string {
 	return r.playState.FilePath
 }
 
+// titleMaxChars is how many 7px glyphs fit across the panel from the left margin.
+// titleLineHeight is the baseline advance between wrapped title lines.
+const (
+	titleMaxChars   = 44
+	titleLineHeight = 15
+)
+
+// drawTitle renders the book title, wrapping onto a second line rather than
+// hard-truncating so long titles (e.g. "Harry Potter and the Prisoner of
+// Azkaban") stay readable.
 func (r *Renderer) drawTitle(title string) {
-	addLabel(r.canvas, 10, 30, truncate(title, 44), colorText)
+	y := 30
+	for _, line := range wrapText(title, titleMaxChars, 2) {
+		addLabel(r.canvas, 10, y, line, colorText)
+		y += titleLineHeight
+	}
+}
+
+// wrapText greedily word-wraps s into at most maxLines lines of at most maxChars
+// characters each, hard-splitting any single word longer than maxChars. If the
+// text still doesn't fit, the last shown line ends with "..." to signal more.
+func wrapText(s string, maxChars, maxLines int) []string {
+	var lines []string
+	cur := ""
+	push := func() {
+		if cur != "" {
+			lines = append(lines, cur)
+			cur = ""
+		}
+	}
+	for _, w := range strings.Fields(s) {
+		for len(w) > maxChars { // hard-split a word wider than the screen
+			push()
+			lines = append(lines, w[:maxChars])
+			w = w[maxChars:]
+		}
+		switch {
+		case cur == "":
+			cur = w
+		case len(cur)+1+len(w) <= maxChars:
+			cur += " " + w
+		default:
+			push()
+			cur = w
+		}
+	}
+	push()
+
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	if len(lines) <= maxLines {
+		return lines
+	}
+	lines = lines[:maxLines]
+	last := lines[maxLines-1]
+	if len(last) > maxChars-3 {
+		last = last[:maxChars-3]
+	}
+	lines[maxLines-1] = last + "..."
+	return lines
 }
 
 func (r *Renderer) drawChapterTitle(title string) {
@@ -462,16 +598,30 @@ func (r *Renderer) drawChapterProgress(chapter chapterInfo) {
 	fillRect(r.canvas, 10, 150, int(float64(barWidth)*pct), 10, colorBarFill)
 }
 
-func (r *Renderer) drawTimes(chapter chapterInfo) {
-	chapPos := r.playState.Position - chapter.start
+// drawTimes shows chapter and whole-book progress. Each line reads
+// elapsed / total  -remaining, so the listener can see both how far into the
+// book they are and how much is left at a glance (bug 6).
+func (r *Renderer) drawTimes(chapter chapterInfo, bookDur float64) {
+	chapPos := nonNeg(r.playState.Position - chapter.start)
 	chapDur := chapter.end - chapter.start
 	addLabel(r.canvas, 10, 180,
-		fmt.Sprintf("Chap: %s / %s", formatMinSec(chapPos), formatMinSec(chapDur)),
+		fmt.Sprintf("Chapter %s / %s  -%s",
+			formatMinSec(chapPos), formatMinSec(chapDur), formatMinSec(nonNeg(chapDur-chapPos))),
 		colorMuted)
 
+	bookPos := nonNeg(r.playState.Position)
 	addLabel(r.canvas, 10, 200,
-		fmt.Sprintf("Total: %s / %s", formatHourMin(r.playState.Position), formatHourMin(r.playState.Duration)),
+		fmt.Sprintf("Book %s / %s  -%s",
+			formatHourMin(bookPos), formatHourMin(bookDur), formatHourMin(nonNeg(bookDur-bookPos))),
 		colorFaint)
+}
+
+// nonNeg clamps a duration to zero so end-of-file rounding can't show "-00:01".
+func nonNeg(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 // fillRect paints a solid w×h rectangle with its top-left corner at (x, y).
@@ -575,5 +725,5 @@ func (r *Renderer) SetEncoderMode(mode string) {
 	r.mu.Lock()
 	r.encoderMode = mode
 	r.mu.Unlock()
-	r.render()
+	r.requestRender()
 }
