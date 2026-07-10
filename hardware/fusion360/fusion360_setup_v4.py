@@ -118,8 +118,8 @@ class AssemblyBuilder:
 
         # 4. Mounting Holes (two M2.5 holes)
         # Bottom left and bottom right
-        self._cut_cylinder(comp, xy, -0.7, -0.6, 0.125, -0.1, 0.5)
-        self._cut_cylinder(comp, xy, 0.7, -0.6, 0.125, -0.1, 0.5)
+        self._cut_cylinder(comp, xy, -0.7, -0.6, 0.125, 0.6, -0.1)
+        self._cut_cylinder(comp, xy, 0.7, -0.6, 0.125, 0.6, -0.1)
 
     def build_encoder(self, transform: adsk.core.Matrix3D):
         comp = self.create_component("Rotary_Encoder_EC11", transform)
