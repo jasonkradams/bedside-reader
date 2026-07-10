@@ -172,8 +172,8 @@ class EnclosureBuilder(AssemblyBuilder):
         comp = self.create_component("Outer_Enclosure", adsk.core.Matrix3D.create())
         xy = comp.xYConstructionPlane
         
-        # 1. Solid Bounding Box
-        box_feature = self._extrude_rect(comp, xy, 0.25, 0.0, 11.5, 5.0, 3.2, -3.0)
+        # 1. Solid Bounding Box (cx=0.5, W=12.5, H=6.0)
+        box_feature = self._extrude_rect(comp, xy, 0.5, 0.0, 12.5, 6.0, 3.2, -3.0)
         box_body = box_feature.bodies.item(0)
         
         # 1.5. Ergonomic Fillet
@@ -277,8 +277,8 @@ class EnclosureBuilder(AssemblyBuilder):
                 self._cut_cylinder(comp, xy, hx, hy, 0.1, -1.0, 0.0)
                 
         # Speaker Standoffs
-        for hx in [-3.0 - 1.6, -3.0 + 1.6]:
-            for hy in [-0.5 - 1.6, -0.5 + 1.6]:
+        for hx in [-3.0 - 1.35, -3.0 + 1.35]:
+            for hy in [-0.5 - 1.35, -0.5 + 1.35]:
                 self._extrude_cylinder(comp, xy, hx, hy, 0.25, -1.0, 0.0, adsk.fusion.FeatureOperations.JoinFeatureOperation)
                 self._cut_cylinder(comp, xy, hx, hy, 0.1, -1.0, 0.0)
                 
@@ -287,53 +287,8 @@ class EnclosureBuilder(AssemblyBuilder):
         for px, py in pts:
             self._extrude_cylinder(comp, xy, px, py, 0.25, 0.3, -2.8, adsk.fusion.FeatureOperations.JoinFeatureOperation)
             self._cut_cylinder(comp, xy, px, py, 0.1, 0.3, -2.8)
-            
-        # 6. Speaker Acoustic Box
-        lid_input = comp.constructionPlanes.createInput()
-        lid_input.setByOffset(xy, adsk.core.ValueInput.createByReal(-1.8))
-        lid_plane = comp.constructionPlanes.add(lid_input)
         
-        sk_lid = comp.sketches.add(lid_plane)
-        sk_lid.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.75, gy + 1.75, 0)
-        )
-        lCol = adsk.core.ObjectCollection.create()
-        lCol.add(sk_lid.profiles.item(0))
-        lidExt = comp.features.extrudeFeatures.createInput(lCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
-        lidExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.2)) # Towards +Z
-        lid_feature = comp.features.extrudeFeatures.add(lidExt)
-        lid_body = lid_feature.bodies.item(0)
-        lid_body.name = "Speaker_Acoustic_Lid"
-        
-        sk_lip = comp.sketches.add(lid_plane)
-        sk_lip.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.58, gy + 1.58, 0)
-        )
-        sk_lip.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.4, gy + 1.4, 0)
-        )
-        lipCol = adsk.core.ObjectCollection.create()
-        for p in sk_lip.profiles:
-            if p.profileLoops.count > 1:
-                lipCol.add(p)
-        lipExt = comp.features.extrudeFeatures.createInput(lipCol, adsk.fusion.FeatureOperations.JoinFeatureOperation)
-        lipExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(1.8)) # Hit front wall
-        lipExt.participantBodies = [lid_body]
-        comp.features.extrudeFeatures.add(lipExt)
-        
-        sk_notch = comp.sketches.add(lid_plane)
-        sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(gx - 1.575, gy, 0),
-            adsk.core.Point3D.create(gx - 1.575 + 0.25, gy + 0.15, 0)
-        )
-        notchCol = adsk.core.ObjectCollection.create()
-        notchCol.add(sk_notch.profiles.item(0))
-        notchExt = comp.features.extrudeFeatures.createInput(notchCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
-        notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5))
-        notchExt.participantBodies = [lid_body]
-        comp.features.extrudeFeatures.add(notchExt)
-        
-        # 7. Split Case and Create Lap Joint
+        # 6. Split Case and Create Lap Joint
         main_body = None
         for b in comp.bRepBodies:
             if b.name != "Speaker_Acoustic_Lid":
@@ -363,8 +318,8 @@ class EnclosureBuilder(AssemblyBuilder):
                 
                 # Build lap joint
                 sk_lip = comp.sketches.add(splitPlane)
-                self._draw_rounded_rect(sk_lip, 0.25, 0.0, 11.1, 4.6, 0.8)
-                self._draw_rounded_rect(sk_lip, 0.25, 0.0, 10.7, 4.2, 0.6)
+                self._draw_rounded_rect(sk_lip, 0.5, 0.0, 12.1, 5.6, 0.8)
+                self._draw_rounded_rect(sk_lip, 0.5, 0.0, 11.7, 5.2, 0.6)
                 
                 lipCol = adsk.core.ObjectCollection.create()
                 for p in sk_lip.profiles:
@@ -388,6 +343,71 @@ class EnclosureBuilder(AssemblyBuilder):
                 combCut.operation = adsk.fusion.FeatureOperations.CutFeatureOperation
                 combCut.isKeepToolBodies = True
                 comp.features.combineFeatures.add(combCut)
+                
+                # 7. Speaker Acoustic Box (Joined to Front Faceplate)
+                gx, gy = -3.0, -0.5
+                sk_walls = comp.sketches.add(xy)
+                sk_walls.sketchCurves.sketchLines.addCenterPointRectangle(
+                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.9, gy + 1.9, 0)
+                )
+                sk_walls.sketchCurves.sketchLines.addCenterPointRectangle(
+                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.7, gy + 1.7, 0)
+                )
+                wallCol = adsk.core.ObjectCollection.create()
+                for p in sk_walls.profiles:
+                    if p.profileLoops.count > 1:
+                        wallCol.add(p)
+                wallExt = comp.features.extrudeFeatures.createInput(wallCol, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+                wallExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-1.8))
+                wallExt.participantBodies = [front_body]
+                comp.features.extrudeFeatures.add(wallExt)
+
+                # Acoustic Lid
+                lid_input = comp.constructionPlanes.createInput()
+                lid_input.setByOffset(xy, adsk.core.ValueInput.createByReal(-1.8))
+                lid_plane = comp.constructionPlanes.add(lid_input)
+
+                sk_lid = comp.sketches.add(lid_plane)
+                sk_lid.sketchCurves.sketchLines.addCenterPointRectangle(
+                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 2.0, gy + 2.0, 0)
+                )
+                lCol = adsk.core.ObjectCollection.create()
+                lCol.add(sk_lid.profiles.item(0))
+                lidExt = comp.features.extrudeFeatures.createInput(lCol, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+                lidExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(-0.2)) # Towards -Z
+                lid_feature = comp.features.extrudeFeatures.add(lidExt)
+                lid_body = lid_feature.bodies.item(0)
+                lid_body.name = "Speaker_Acoustic_Lid"
+
+                # Acoustic Lip
+                sk_lip_spk = comp.sketches.add(lid_plane)
+                sk_lip_spk.sketchCurves.sketchLines.addCenterPointRectangle(
+                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.7, gy + 1.7, 0)
+                )
+                sk_lip_spk.sketchCurves.sketchLines.addCenterPointRectangle(
+                    adsk.core.Point3D.create(gx, gy, 0), adsk.core.Point3D.create(gx + 1.5, gy + 1.5, 0)
+                )
+                lipColSpk = adsk.core.ObjectCollection.create()
+                for p in sk_lip_spk.profiles:
+                    if p.profileLoops.count > 1:
+                        lipColSpk.add(p)
+                lipExtSpk = comp.features.extrudeFeatures.createInput(lipColSpk, adsk.fusion.FeatureOperations.JoinFeatureOperation)
+                lipExtSpk.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.4)) # Extrude into walls by 4mm (+Z)
+                lipExtSpk.participantBodies = [lid_body]
+                comp.features.extrudeFeatures.add(lipExtSpk)
+
+                # Wire Notch
+                sk_notch = comp.sketches.add(lid_plane)
+                sk_notch.sketchCurves.sketchLines.addCenterPointRectangle(
+                    adsk.core.Point3D.create(gx - 1.8, gy, 0),
+                    adsk.core.Point3D.create(gx - 1.8 + 0.25, gy + 0.25, 0)
+                )
+                notchCol = adsk.core.ObjectCollection.create()
+                notchCol.add(sk_notch.profiles.item(0))
+                notchExt = comp.features.extrudeFeatures.createInput(notchCol, adsk.fusion.FeatureOperations.CutFeatureOperation)
+                notchExt.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.6))
+                notchExt.participantBodies = [lid_body, front_body]
+                comp.features.extrudeFeatures.add(notchExt)
 
 def create_translation(x, y, z):
     mat = adsk.core.Matrix3D.create()
