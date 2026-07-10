@@ -176,6 +176,8 @@ class EnclosureBuilder(AssemblyBuilder):
         # 1.5. Ergonomic Fillet
         vertCol = adsk.core.ObjectCollection.create()
         for edge in box_body.edges:
+            if not edge.startVertex or not edge.endVertex:
+                continue
             p1 = edge.startVertex.geometry
             p2 = edge.endVertex.geometry
             if abs(p1.x - p2.x) < 1e-5 and abs(p1.y - p2.y) < 1e-5:
@@ -184,10 +186,15 @@ class EnclosureBuilder(AssemblyBuilder):
         if vertCol.count > 0:
             filletInput1 = comp.features.filletFeatures.createInput()
             filletInput1.addConstantRadiusEdgeSet(vertCol, adsk.core.ValueInput.createByReal(0.8), True)
-            comp.features.filletFeatures.add(filletInput1)
+            try:
+                comp.features.filletFeatures.add(filletInput1)
+            except:
+                pass
             
         horizCol = adsk.core.ObjectCollection.create()
         for edge in box_body.edges:
+            if not edge.startVertex or not edge.endVertex:
+                continue
             p1 = edge.startVertex.geometry
             p2 = edge.endVertex.geometry
             if not (abs(p1.x - p2.x) < 1e-5 and abs(p1.y - p2.y) < 1e-5):
@@ -196,7 +203,10 @@ class EnclosureBuilder(AssemblyBuilder):
         if horizCol.count > 0:
             filletInput2 = comp.features.filletFeatures.createInput()
             filletInput2.addConstantRadiusEdgeSet(horizCol, adsk.core.ValueInput.createByReal(0.2), True)
-            comp.features.filletFeatures.add(filletInput2)
+            try:
+                comp.features.filletFeatures.add(filletInput2)
+            except:
+                pass
         
         # 2. Shell it (2mm walls)
         objs = adsk.core.ObjectCollection.create()
@@ -258,8 +268,8 @@ class EnclosureBuilder(AssemblyBuilder):
         
         sk_bottom = comp.sketches.add(xz_bottom)
         sk_bottom.sketchCurves.sketchLines.addCenterPointRectangle(
-            adsk.core.Point3D.create(4.65, -1.38, 0),
-            adsk.core.Point3D.create(4.65 + 0.6, -1.38 + 0.3, 0)
+            adsk.core.Point3D.create(4.65, 1.38, 0),
+            adsk.core.Point3D.create(4.65 + 0.6, 1.38 + 0.3, 0)
         )
         objs_bot = adsk.core.ObjectCollection.create()
         for i in range(sk_bottom.profiles.count):
