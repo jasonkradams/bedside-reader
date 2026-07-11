@@ -2,6 +2,7 @@ package library
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,7 +12,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/jasonkradams/bedside-reader/internal/bus"
 	"go.etcd.io/bbolt"
 )
@@ -49,10 +53,12 @@ type Progress struct {
 
 // Manager handles the database and scanning
 type Manager struct {
-	db       *bbolt.DB
-	bus      *bus.Bus
-	audioDir string
-	coverDir string
+	db        *bbolt.DB
+	bus       *bus.Bus
+	audioDir  string
+	coverDir  string
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 func New(eventBus *bus.Bus, dbPath, audioDir, coverDir string) (*Manager, error) {
@@ -91,15 +97,70 @@ func New(eventBus *bus.Bus, dbPath, audioDir, coverDir string) (*Manager, error)
 		bus:      eventBus,
 		audioDir: audioDir,
 		coverDir: coverDir,
+		stop:     make(chan struct{}),
 	}
 
 	return m, nil
 }
 
-
-// Close closes the underlying boltdb
+// Close stops the directory watcher and closes the underlying boltdb.
 func (m *Manager) Close() {
+	m.closeOnce.Do(func() { close(m.stop) })
 	m.db.Close()
+}
+
+// Watch runs an initial scan, then rescans whenever the audiobook directory
+// changes, instead of polling. Uploads emit a burst of write events, so scans
+// are debounced until the directory goes quiet. Runs until Close.
+func (m *Manager) Watch() {
+	m.Scan() // initial pass (also backfills cover art)
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("library: watcher unavailable, covers update only at startup: %v", err)
+		return
+	}
+	defer w.Close()
+	if err := w.Add(m.audioDir); err != nil {
+		log.Printf("library: watch %s failed: %v", m.audioDir, err)
+		return
+	}
+
+	debounce := time.NewTimer(time.Hour)
+	debounce.Stop()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case ev, ok := <-w.Events:
+			if !ok {
+				return
+			}
+			if isAudioEvent(ev) {
+				debounce.Reset(5 * time.Second)
+			}
+		case err, ok := <-w.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("library: watch error: %v", err)
+		case <-debounce.C:
+			m.Scan()
+		}
+	}
+}
+
+// isAudioEvent reports whether ev is a create/write/rename/remove of an
+// audiobook file worth rescanning for.
+func isAudioEvent(ev fsnotify.Event) bool {
+	if ev.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename|fsnotify.Remove) == 0 {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(ev.Name)) {
+	case ".m4b", ".mp3", ".m4a":
+		return true
+	}
+	return false
 }
 
 // Scan crawls the audio directory and uses ffprobe to parse metadata
@@ -128,54 +189,150 @@ func (m *Manager) Scan() {
 }
 
 func (m *Manager) processFile(path string) {
-	// Generate an ID by hashing the filename
-	hash := sha256.Sum256([]byte(filepath.Base(path)))
-	id := hex.EncodeToString(hash[:12])
+	id := idForPath(path)
 
-	// Check if already in DB
-	exists := false
-	m.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketLibrary)
-		if b.Get([]byte(id)) != nil {
-			exists = true
+	book, exists := m.getByID(id)
+	if !exists {
+		log.Printf("Scanning new file: %s", filepath.Base(path))
+		probed, err := m.probeFile(path, id)
+		if err != nil {
+			log.Printf("Failed to probe file %s: %v", path, err)
+			return
 		}
+		book = probed
+	}
+
+	// Extract cover art on first scan, and backfill it for books catalogued
+	// before cover support existed (whose cached image is missing).
+	changed := m.ensureCover(book)
+
+	if !exists || changed {
+		m.save(book)
+	}
+}
+
+// idForPath derives the stable library ID from a file's base name.
+func idForPath(path string) string {
+	hash := sha256.Sum256([]byte(filepath.Base(path)))
+	return hex.EncodeToString(hash[:12])
+}
+
+// getByID returns the stored book for id and whether it was present.
+func (m *Manager) getByID(id string) (*Audiobook, bool) {
+	var book *Audiobook
+	_ = m.db.View(func(tx *bbolt.Tx) error {
+		v := tx.Bucket(bucketLibrary).Get([]byte(id))
+		if v == nil {
+			return nil
+		}
+		var b Audiobook
+		if err := json.Unmarshal(v, &b); err != nil {
+			return nil
+		}
+		book = &b
 		return nil
 	})
+	return book, book != nil
+}
 
-	if exists {
-		return // Already scanned
-	}
-
-	log.Printf("Scanning new file: %s", filepath.Base(path))
-
-	book, err := m.probeFile(path, id)
-	if err != nil {
-		log.Printf("Failed to probe file %s: %v", path, err)
-		return
-	}
-
-	// Save to DB
+func (m *Manager) save(book *Audiobook) {
 	_ = m.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketLibrary)
 		data, _ := json.Marshal(book)
-		return b.Put([]byte(id), data)
+		return tx.Bucket(bucketLibrary).Put([]byte(book.ID), data)
 	})
+}
+
+// CoverPath returns the on-disk path where a book's cover art is (or would be)
+// cached, or "" for an empty id.
+func (m *Manager) CoverPath(id string) string {
+	if id == "" {
+		return ""
+	}
+	return filepath.Join(m.coverDir, id+".jpg")
+}
+
+// ensureCover extracts the embedded cover art to disk if it isn't cached yet and
+// keeps CoverHash in sync (set to the book ID when art exists, "" otherwise).
+// Returns true when the book record changed and needs saving.
+func (m *Manager) ensureCover(book *Audiobook) bool {
+	coverPath := m.CoverPath(book.ID)
+	if _, err := os.Stat(coverPath); err == nil {
+		if book.CoverHash != book.ID {
+			book.CoverHash = book.ID
+			return true
+		}
+		return false
+	}
+
+	if err := extractCover(book.FilePath, coverPath); err != nil {
+		if book.CoverHash != "" {
+			book.CoverHash = ""
+			return true
+		}
+		return false
+	}
+	if book.CoverHash != book.ID {
+		book.CoverHash = book.ID
+	}
+	return true
+}
+
+// extractCover writes a downscaled JPEG of the audiobook's embedded cover art to
+// dst via ffmpeg. Returns a non-nil error when the file has no attached picture.
+func extractCover(src, dst string) error {
+	err := execContained(30*time.Second, nil, "ffmpeg",
+		"-y", "-v", "error",
+		"-i", src,
+		"-an",
+		"-map", "0:v:0",
+		"-frames:v", "1",
+		"-vf", "scale=256:256:force_original_aspect_ratio=decrease",
+		"-q:v", "3",
+		dst,
+	)
+	if err != nil {
+		os.Remove(dst) // don't leave a partial/zero-byte file behind
+		return fmt.Errorf("ffmpeg cover extract: %w", err)
+	}
+	return nil
+}
+
+// execContained runs name+args with a hard timeout and at the nicest CPU / idle
+// I/O priority, so metadata probing and cover extraction can never hang the
+// scanner or steal cycles from playback. If stdout is non-nil it captures the
+// command's stdout.
+func execContained(timeout time.Duration, stdout *bytes.Buffer, name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	lowerPriority(cmd.Process.Pid)
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("%s timed out after %s", name, timeout)
+		}
+		return err
+	}
+	return nil
 }
 
 // probeFile runs ffprobe to extract metadata and chapters from an audiobook file.
 func (m *Manager) probeFile(path, id string) (*Audiobook, error) {
-	cmd := exec.Command("ffprobe",
+	var out bytes.Buffer
+	if err := execContained(60*time.Second, &out, "ffprobe",
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_format",
 		"-show_chapters",
 		"-show_streams",
 		path,
-	)
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	); err != nil {
 		return nil, fmt.Errorf("ffprobe failed: %w", err)
 	}
 
@@ -308,6 +465,7 @@ type SystemState struct {
 	Timeout     int     `json:"timeout"`
 	Volume      float64 `json:"volume"`
 	EncoderMode string  `json:"encoderMode"`
+	Font        string  `json:"font"` // UI typeface ID (see internal/ui font registry)
 }
 
 // SaveSystemState saves the full system state
@@ -322,9 +480,10 @@ func (m *Manager) SaveSystemState(state SystemState) error {
 // GetSystemState retrieves the full system state
 func (m *Manager) GetSystemState() (SystemState, error) {
 	state := SystemState{
-		Timeout:     5,      // Default to 5 minutes
-		Volume:      50,     // Default volume
-		EncoderMode: "vol",  // Default to volume mode
+		Timeout:     5,            // Default to 5 minutes
+		Volume:      50,           // Default volume
+		EncoderMode: "vol",        // Default to volume mode
+		Font:        "plex-serif", // mirrors ui.defaultFontID
 	}
 	err := m.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketSystem)

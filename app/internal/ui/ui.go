@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/jpeg"
 	"log"
 	"os"
 	"path/filepath"
@@ -16,36 +17,60 @@ import (
 	"github.com/jasonkradams/bedside-reader/internal/display"
 	"github.com/jasonkradams/bedside-reader/internal/library"
 	"github.com/jasonkradams/bedside-reader/internal/player"
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/basicfont"
-	"golang.org/x/image/math/fixed"
 	"golang.org/x/sys/unix"
 )
 
-// UI palette. color.RGBA values cannot be constants, so these are package vars.
+// Warm "nightstand" palette: low blue light for a dark bedroom, cream/amber on a
+// near-black warm ground, echoing the gold-on-dark of typical audiobook covers.
+// color.RGBA values can't be consts, so these are package vars.
 var (
-	colorBackground   = color.RGBA{0, 0, 50, 255}      // screen background
-	colorMenuOverlay  = color.RGBA{0, 0, 0, 230}       // dimmed menu backdrop
-	colorText         = color.RGBA{255, 255, 255, 255} // primary text / selected book
-	colorMuted        = color.RGBA{200, 200, 200, 255} // secondary text / menu row
-	colorFaint        = color.RGBA{150, 150, 150, 255} // total-time line
-	colorChapter      = color.RGBA{200, 200, 255, 255} // chapter title
-	colorStatus       = color.RGBA{150, 255, 150, 255} // play/pause status line
-	colorBarTrack     = color.RGBA{100, 100, 100, 255} // progress bar background
-	colorBarFill      = color.RGBA{100, 255, 100, 255} // progress bar fill
-	colorMenuHeader   = color.RGBA{200, 255, 200, 255} // "Library Menu" heading
-	colorMenuSelected = color.RGBA{255, 255, 50, 255}  // highlighted settings row
-	colorNowPlaying   = color.RGBA{150, 200, 255, 255} // book currently loaded
+	colorBg         = color.RGBA{18, 15, 12, 255}    // near-black warm ground
+	colorPanel      = color.RGBA{30, 25, 19, 255}    // lifted panel / placeholder
+	colorText       = color.RGBA{242, 234, 218, 255} // warm cream, primary
+	colorMuted      = color.RGBA{178, 162, 138, 255} // warm taupe, secondary
+	colorFaint      = color.RGBA{120, 108, 92, 255}  // faint tertiary
+	colorAccent     = color.RGBA{226, 170, 98, 255}  // amber/gold accent
+	colorTrack      = color.RGBA{70, 58, 44, 255}    // progress track
+	colorStatus     = color.RGBA{158, 196, 138, 255} // soft sage, playing/now-playing
+	colorCoverFrame = color.RGBA{58, 48, 36, 255}    // cover border
+	colorMenuScrim  = color.RGBA{12, 9, 7, 236}      // menu backdrop
+	colorMenuHeader = color.RGBA{226, 170, 98, 255}  // menu heading (amber)
+	colorMenuSel    = color.RGBA{255, 224, 170, 255} // selected row (bright amber)
+	colorMenuSelBar = color.RGBA{226, 170, 98, 255}  // selection accent bar
+	colorWifiOn     = color.RGBA{158, 196, 138, 255}
+	colorWifiOff    = color.RGBA{150, 90, 74, 255}
+)
+
+// Layout geometry for the 320x240 panel (cover-hero split).
+const (
+	pad       = 12
+	coverX    = pad
+	coverY    = 18
+	coverSize = 150
+	textX     = coverX + coverSize + 14 // right text column
+	textW     = panelWidth - textX - pad
+	progressY = 186
+	barH      = 6
+	timesY    = 208
+	statusY   = 230
 )
 
 type Renderer struct {
-	bus       *bus.Bus
-	lib       *library.Manager
-	fbFile    *os.File
-	frame     []byte // RGB565 frame buffer, written to the panel each render
-	canvas    *image.RGBA
-	renderReq chan struct{} // coalesced render requests
-	mu        sync.Mutex
+	bus    *bus.Bus
+	lib    *library.Manager
+	fbFile *os.File
+	mmap   []byte
+	canvas *image.RGBA
+	mu     sync.Mutex
+
+	fonts      *fontManager
+	fontChoice FontChoice
+
+	// Cached scaled cover for the currently-loaded book.
+	coverID  string
+	coverImg *image.RGBA
 
 	// Local state
 	playState     player.PlaybackState
@@ -117,16 +142,49 @@ func readTrim(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
+// panelOpenTimeout bounds how long New waits for the panel framebuffer to be
+// openable. The ST7789 probes late over SPI (~20s into boot) and udev applies
+// its `video` group a moment after the node appears, so opening too early
+// returns ENOENT or EACCES. Retrying avoids crashing on boot (which otherwise
+// forces a systemd restart and adds ~4-5s to first playback).
+const panelOpenTimeout = 20 * time.Second
+
+// openPanelFramebuffer discovers and opens the panel's framebuffer, retrying
+// until it succeeds or timeout elapses (see panelOpenTimeout for why).
+func openPanelFramebuffer(timeout time.Duration) (*os.File, string, error) {
+	deadline := time.Now().Add(timeout)
+	for attempt := 0; ; attempt++ {
+		path, err := panelFramebuffer()
+		if err == nil {
+			f, oerr := os.OpenFile(path, os.O_RDWR, 0)
+			if oerr == nil {
+				return f, path, nil
+			}
+			err = oerr
+		}
+		if time.Now().After(deadline) {
+			return nil, "", fmt.Errorf("panel framebuffer not ready after %s: %w", timeout, err)
+		}
+		if attempt == 0 {
+			log.Printf("UI: waiting for panel framebuffer to be ready: %v", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
 func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
-	fbPath, err := waitForPanelFramebuffer(20 * time.Second)
+	fbFile, fbPath, err := openPanelFramebuffer(panelOpenTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to locate panel framebuffer: %w", err)
+		return nil, err
 	}
 	log.Printf("UI rendering to panel framebuffer %s", fbPath)
 
-	fbFile, err := os.OpenFile(fbPath, os.O_RDWR, 0)
+	// Memory map the framebuffer (320x240, 16-bit color = 153600 bytes)
+	fbSize := panelWidth * panelHeight * 2
+	mmap, err := unix.Mmap(int(fbFile.Fd()), 0, fbSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open %s: %w", fbPath, err)
+		fbFile.Close()
+		return nil, fmt.Errorf("failed to mmap framebuffer: %w", err)
 	}
 
 	// Unblank the framebuffer
@@ -139,45 +197,37 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 	display.SetBacklight(true)
 
 	r := &Renderer{
-		bus:       eventBus,
-		lib:       lib,
-		fbFile:    fbFile,
-		frame:     make([]byte, panelWidth*panelHeight*2),
-		canvas:    image.NewRGBA(image.Rect(0, 0, panelWidth, panelHeight)),
-		renderReq: make(chan struct{}, 1),
+		bus:        eventBus,
+		lib:        lib,
+		fbFile:     fbFile,
+		mmap:       mmap,
+		canvas:     image.NewRGBA(image.Rect(0, 0, panelWidth, panelHeight)),
+		fonts:      newFontManager(),
+		fontChoice: fontByID(defaultFontID),
 	}
 
-	go r.renderLoop()
 	go r.listen()
 	go r.pollWiFi()
-	go r.periodicRefresh()
-	r.requestRender() // initial render
+	r.render() // initial render
 
 	return r, nil
 }
 
-// waitForPanelFramebuffer polls for the panel's framebuffer for up to timeout.
-// On this board the SPI panel driver can probe a second or two after the app
-// starts, so retrying (rather than failing fast) avoids a boot-time crash-restart
-// loop when systemd starts the service before /dev/fbN for the panel exists.
-func waitForPanelFramebuffer(timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
-	for {
-		fbPath, err := panelFramebuffer()
-		if err == nil {
-			return fbPath, nil
-		}
-		if time.Now().After(deadline) {
-			return "", err
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
 func (r *Renderer) Close() {
+	if r.mmap != nil {
+		unix.Munmap(r.mmap)
+	}
 	if r.fbFile != nil {
 		r.fbFile.Close()
 	}
+}
+
+// SetFont switches the active typeface (by registry ID) and repaints.
+func (r *Renderer) SetFont(id string) {
+	r.mu.Lock()
+	r.fontChoice = fontByID(id)
+	r.mu.Unlock()
+	r.render()
 }
 
 func (r *Renderer) pollWiFi() {
@@ -194,42 +244,10 @@ func (r *Renderer) pollWiFi() {
 		r.mu.Unlock()
 
 		if changed {
-			r.requestRender()
+			r.render()
 		}
 
 		time.Sleep(2 * time.Second)
-	}
-}
-
-// requestRender asks the render loop to redraw. It coalesces: many requests
-// between frames collapse into one, decoupling the bursty event rate from the
-// bounded panel refresh rate.
-func (r *Renderer) requestRender() {
-	select {
-	case r.renderReq <- struct{}{}:
-	default:
-	}
-}
-
-// renderLoop serializes rendering and caps the refresh rate. After each frame it
-// sleeps briefly; requests that arrive during the sleep coalesce into the next
-// frame, so a storm of progress ticks can't saturate the SPI bus or the CPU.
-func (r *Renderer) renderLoop() {
-	const minInterval = 66 * time.Millisecond // ~15 fps ceiling
-	for range r.renderReq {
-		r.render()
-		time.Sleep(minInterval)
-	}
-}
-
-// periodicRefresh redraws at a slow cadence even when nothing changed, so the
-// panel self-heals any SPI glitch and always reflects current state (for example
-// after the screen wakes from a blanked idle).
-func (r *Renderer) periodicRefresh() {
-	ticker := time.NewTicker(1500 * time.Millisecond)
-	defer ticker.Stop()
-	for range ticker.C {
-		r.requestRender()
 	}
 }
 
@@ -248,10 +266,14 @@ func (r *Renderer) listen() {
 				r.menuState = state
 				needsRender = true
 			}
+		case bus.EventLibraryScanComplete:
+			// A scan may have just extracted the current book's cover art;
+			// repaint so it appears without waiting for the next event.
+			needsRender = true
 		}
 
 		if needsRender {
-			r.requestRender()
+			r.render()
 		}
 	}
 }
@@ -260,156 +282,21 @@ func (r *Renderer) render() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// 1. Clear background (dark blue)
-	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{colorBackground}, image.Point{}, draw.Src)
-
-	// 2. Draw a bright red calibration border around the absolute edge (1 pixel thick)
-	red := color.RGBA{255, 0, 0, 255}
-	fillRect(r.canvas, 0, 0, panelWidth, 1, red)              // top
-	fillRect(r.canvas, 0, panelHeight-1, panelWidth, 1, red)  // bottom
-	fillRect(r.canvas, 0, 0, 1, panelHeight, red)             // left
-	fillRect(r.canvas, panelWidth-1, 0, 1, panelHeight, red)  // right
+	draw.Draw(r.canvas, r.canvas.Bounds(), &image.Uniform{colorBg}, image.Point{}, draw.Src)
 
 	r.renderPlayer()
 	if r.menuState.Active {
 		r.renderMenu()
 	}
-	// Wi-Fi status sits in the bottom-right corner (see bug 5) so it no longer
-	// consumes a full row at the top of the screen.
-	r.drawWiFiIcon(300, 193, r.wifiConnected)
+	r.drawWiFiIcon(panelWidth-20, 8, r.wifiConnected)
 
-	// Push the frame to the panel.
-	copyToRGB565(r.frame, r.canvas)
-	r.flush()
-}
-
-// flush writes the RGB565 frame to the panel framebuffer. Going through the
-// fbdev write path (instead of a shared mmap) makes the panel driver treat the
-// whole frame as damaged and push it over SPI every time — so a glitched or
-// partially-updated region heals on the next render, instead of leaving the
-// permanent stale bands that stale mmap dirty-tracking produced over time.
-func (r *Renderer) flush() {
-	for off := 0; off < len(r.frame); {
-		n, err := r.fbFile.WriteAt(r.frame[off:], int64(off))
-		if err != nil {
-			log.Printf("framebuffer write failed at offset %d: %v", off, err)
-			return
-		}
-		if n <= 0 {
-			return
-		}
-		off += n
-	}
-}
-
-// Menu layout geometry, in pixels.
-const (
-	menuFirstRowY = 70
-	menuRowHeight = 25
-	menuBottomY   = 220
-)
-
-func (r *Renderer) renderMenu() {
-	r.drawMenuBackground()
-
-	books := r.menuBooks()
-	scrollStart := menuScrollStart(r.menuState.Index)
-	y := menuFirstRowY
-
-	// Menu index 0 is the Settings row; books follow at indices 1..N. The
-	// Settings row is only visible before the list has scrolled.
-	if scrollStart == 0 {
-		r.drawSettingsRow(y)
-		y += menuRowHeight
-	}
-
-	for i := scrollStart; i < len(books); i++ {
-		if y > menuBottomY {
-			break // off screen
-		}
-		r.drawBookRow(y, i, books[i])
-		y += menuRowHeight
-	}
-}
-
-func (r *Renderer) drawMenuBackground() {
-	fillRect(r.canvas, 0, 30, 320, 210, colorMenuOverlay)
-	addLabel(r.canvas, 10, 50, "Library Menu", colorMenuHeader)
-}
-
-// menuBooks returns the audiobook list carried on the menu state, or nil when
-// the payload is missing or of an unexpected type.
-func (r *Renderer) menuBooks() []library.Audiobook {
-	books, ok := r.menuState.Books.([]library.Audiobook)
-	if !ok {
-		return nil
-	}
-	return books
-}
-
-// menuScrollStart returns the first list row to draw so the selected item stays
-// on screen once the selection moves past the visible window.
-func menuScrollStart(index int) int {
-	const visibleBeforeSelection = 5
-	if index > visibleBeforeSelection {
-		return index - visibleBeforeSelection
-	}
-	return 0
-}
-
-func (r *Renderer) drawSettingsRow(y int) {
-	c := colorMuted
-	prefix := "  "
-	if r.menuState.Index == 0 {
-		c = colorMenuSelected
-		prefix = "> "
-	}
-	sysState, _ := r.lib.GetSystemState()
-	label := fmt.Sprintf("%sSettings: Screen Timeout [%s]", prefix, timeoutLabel(sysState.Timeout))
-	addLabel(r.canvas, 10, y, label, c)
-}
-
-// timeoutLabel renders the screen-timeout setting; non-positive means off.
-func timeoutLabel(minutes int) string {
-	if minutes <= 0 {
-		return "Off"
-	}
-	return fmt.Sprintf("%dm", minutes)
-}
-
-func (r *Renderer) drawBookRow(y, i int, b library.Audiobook) {
-	prefix, c := r.bookRowStyle(i, b)
-	addLabel(r.canvas, 10, y, prefix+bookTitle(b), c)
-}
-
-// bookRowStyle returns the marker prefix and color for book row i: the selected
-// row wins, then the currently-playing book, then a plain row.
-func (r *Renderer) bookRowStyle(i int, b library.Audiobook) (string, color.RGBA) {
-	switch {
-	case i+1 == r.menuState.Index:
-		return "> ", colorText
-	case filepath.Base(b.FilePath) == filepath.Base(r.playState.FilePath):
-		return "* ", colorNowPlaying
-	default:
-		return "  ", colorMuted
-	}
-}
-
-// bookTitle returns the display title for a book, falling back to the file's
-// base name, truncated to fit the menu width.
-func bookTitle(b library.Audiobook) string {
-	title := b.Title
-	if title == "" {
-		title = filepath.Base(b.FilePath)
-	}
-	return truncate(title, 42)
+	copyToRGB565(r.mmap, r.canvas)
 }
 
 // idleTitle is shown on the player screen when no audiobook is loaded.
 const idleTitle = "Bedside Audio"
 
-// chapterInfo describes the currently-playing chapter's title and bounds,
-// resolved from library metadata and the current playback position.
+// chapterInfo describes the currently-playing chapter's title and bounds.
 type chapterInfo struct {
 	title string
 	start float64
@@ -422,27 +309,16 @@ func (r *Renderer) renderPlayer() {
 	title := r.displayTitle(book)
 	idle := title == idleTitle
 
-	r.drawTitle(title)
-	r.drawChapterTitle(chapter.title)
-	r.drawStatus(idle)
+	r.ensureCover(book)
+	r.drawCover(title)
+	r.drawInfoColumn(book, title, chapter)
 
 	if idle {
 		return
 	}
-	r.drawChapterProgress(chapter)
-	r.drawTimes(chapter, r.bookDuration(book))
-}
-
-// bookDuration returns the whole-book length, preferring mpv's live stream
-// duration and falling back to the library metadata when mpv hasn't reported it.
-func (r *Renderer) bookDuration(book *library.Audiobook) float64 {
-	if r.playState.Duration > 0 {
-		return r.playState.Duration
-	}
-	if book != nil {
-		return book.Duration
-	}
-	return 0
+	r.drawProgress(chapter)
+	r.drawTimes(chapter)
+	r.drawStatus()
 }
 
 // currentBook returns the library metadata for the loaded file, or nil when
@@ -458,6 +334,80 @@ func (r *Renderer) currentBook() *library.Audiobook {
 	return book
 }
 
+// ensureCover decodes and scales the current book's cover once, caching the
+// result. It is a no-op when the same book is already cached.
+func (r *Renderer) ensureCover(book *library.Audiobook) {
+	if book == nil || book.CoverHash == "" {
+		r.coverID = ""
+		r.coverImg = nil
+		return
+	}
+	if r.coverID == book.ID && r.coverImg != nil {
+		return
+	}
+	r.coverID = book.ID
+	r.coverImg = nil
+
+	f, err := os.Open(r.lib.CoverPath(book.ID))
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	src, err := jpeg.Decode(f)
+	if err != nil {
+		return
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, coverSize, coverSize))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Over, nil)
+	r.coverImg = dst
+}
+
+// drawCover paints the cached cover (or a styled placeholder) in a subtle frame.
+func (r *Renderer) drawCover(title string) {
+	fillRect(r.canvas, coverX-1, coverY-1, coverSize+2, coverSize+2, colorCoverFrame)
+	if r.coverImg != nil {
+		draw.Draw(r.canvas,
+			image.Rect(coverX, coverY, coverX+coverSize, coverY+coverSize),
+			r.coverImg, image.Point{}, draw.Src)
+		return
+	}
+	// Placeholder: the title's first letter, large and faint.
+	fillRect(r.canvas, coverX, coverY, coverSize, coverSize, colorPanel)
+	glyph := "♪"
+	if t := strings.TrimSpace(title); t != "" && t != idleTitle {
+		glyph = strings.ToUpper(string([]rune(t)[:1]))
+	}
+	face := r.fonts.face(r.fontChoice.bold, 72)
+	w := textWidth(face, glyph)
+	drawText(r.canvas, coverX+(coverSize-w)/2, coverY+coverSize/2+26, glyph, face, colorFaint)
+}
+
+// drawInfoColumn renders title / author / chapter in the right-hand column.
+func (r *Renderer) drawInfoColumn(book *library.Audiobook, title string, chapter chapterInfo) {
+	titleFace := r.fonts.face(r.fontChoice.bold, sizeTitle)
+	y := coverY + lineHeight(titleFace) - 2
+	for _, line := range wrapLines(titleFace, title, textW, 3) {
+		drawText(r.canvas, textX, y, line, titleFace, colorText)
+		y += lineHeight(titleFace)
+	}
+
+	if book != nil && book.Author != "" {
+		af := r.fonts.face(r.fontChoice.regular, sizeBody)
+		y += 4
+		drawText(r.canvas, textX, y+lineHeight(af)-4, ellipsize(af, book.Author, textW), af, colorMuted)
+		y += lineHeight(af)
+	}
+
+	if chapter.title != "" {
+		cf := r.fonts.face(r.fontChoice.regular, sizeChapter)
+		y += 8
+		for _, line := range wrapLines(cf, chapter.title, textW, 2) {
+			drawText(r.canvas, textX, y+lineHeight(cf)-4, line, cf, colorAccent)
+			y += lineHeight(cf)
+		}
+	}
+}
+
 // resolveChapter finds the chapter containing the current playback position.
 // The end time falls back to the book (or stream) duration when the position
 // precedes the first chapter or when metadata is incomplete.
@@ -467,15 +417,14 @@ func (r *Renderer) resolveChapter(book *library.Audiobook) chapterInfo {
 		return info
 	}
 
-	// Default end to book duration in case mpv hasn't reported it yet.
 	info.end = book.Duration
 	if info.end == 0 {
-		info.end = r.playState.Duration // ultimate fallback
+		info.end = r.playState.Duration
 	}
 
 	idx := library.ChapterIndexAt(book.Chapters, r.playState.Position)
 	if idx < 0 {
-		return info // before the first chapter
+		return info
 	}
 	info.title = book.Chapters[idx].Title
 	info.start = book.Chapters[idx].StartTime
@@ -499,143 +448,180 @@ func (r *Renderer) displayTitle(book *library.Audiobook) string {
 	return r.playState.FilePath
 }
 
-// titleMaxChars is how many 7px glyphs fit across the panel from the left margin.
-// titleLineHeight is the baseline advance between wrapped title lines.
+func (r *Renderer) drawProgress(chapter chapterInfo) {
+	barW := panelWidth - 2*pad
+	dur := chapter.end - chapter.start
+	pct := 0.0
+	if dur > 0 {
+		pct = clamp01((r.playState.Position - chapter.start) / dur)
+	}
+	fillRect(r.canvas, pad, progressY, barW, barH, colorTrack)
+	fillRect(r.canvas, pad, progressY, int(float64(barW)*pct), barH, colorAccent)
+	// playhead knob
+	kx := pad + int(float64(barW)*pct)
+	fillRect(r.canvas, kx-1, progressY-3, 3, barH+6, colorText)
+}
+
+func (r *Renderer) drawTimes(chapter chapterInfo) {
+	face := r.fonts.face(r.fontChoice.regular, sizeSmall)
+	chapPos := r.playState.Position - chapter.start
+	chapDur := chapter.end - chapter.start
+	left := fmt.Sprintf("%s / %s", formatMinSec(chapPos), formatMinSec(chapDur))
+	drawText(r.canvas, pad, timesY, left, face, colorMuted)
+
+	right := formatHourMin(r.playState.Duration) + " total"
+	drawText(r.canvas, panelWidth-pad-textWidth(face, right), timesY, right, face, colorFaint)
+}
+
+func (r *Renderer) drawStatus() {
+	face := r.fonts.face(r.fontChoice.regular, sizeSmall)
+	status := "❚❚ Paused"
+	col := colorMuted
+	if !r.playState.Paused {
+		status = "▶ Playing"
+		col = colorStatus
+	}
+	drawText(r.canvas, pad, statusY, status, face, col)
+
+	var right string
+	if r.encoderMode == "scrub" {
+		right = "Scrub"
+	} else {
+		right = fmt.Sprintf("Vol %d%%", int(r.playState.Volume))
+	}
+	drawText(r.canvas, panelWidth-pad-textWidth(face, right), statusY, right, face, colorMuted)
+}
+
+// ---- Library / settings menu ----
+
+// SettingsRowCount is the number of settings rows shown above the book list in
+// the menu. App and the renderer must agree on this so selection indices align
+// (rows 0..SettingsRowCount-1 are settings; SettingsRowCount.. are books).
+const SettingsRowCount = 2
+
+// menuSetting is one non-book row at the top of the menu.
+type menuSetting struct {
+	label string
+	value string
+}
+
+// settingsRows returns the fixed settings rows shown above the book list, in
+// order. The count here must match App's settingsRowCount so selection indices
+// line up (rows 0..N-1 are settings, N.. are books).
+func (r *Renderer) settingsRows() []menuSetting {
+	sysState, _ := r.lib.GetSystemState()
+	return []menuSetting{
+		{label: "Screen Timeout", value: timeoutLabel(sysState.Timeout)},
+		{label: "Font", value: r.fontChoice.Name},
+	}
+}
+
+// Menu layout geometry, in pixels.
 const (
-	titleMaxChars   = 44
-	titleLineHeight = 15
+	menuHeaderY   = 30
+	menuFirstRowY = 58
+	menuRowHeight = 26
+	menuBottomY   = 232
 )
 
-// drawTitle renders the book title, wrapping onto a second line rather than
-// hard-truncating so long titles (e.g. "Harry Potter and the Prisoner of
-// Azkaban") stay readable.
-func (r *Renderer) drawTitle(title string) {
-	y := 30
-	for _, line := range wrapText(title, titleMaxChars, 2) {
-		addLabel(r.canvas, 10, y, line, colorText)
-		y += titleLineHeight
+func (r *Renderer) renderMenu() {
+	// Full-screen warm scrim.
+	fillRect(r.canvas, 0, 0, panelWidth, panelHeight, colorMenuScrim)
+	hf := r.fonts.face(r.fontChoice.bold, sizeMenuHdr)
+	drawText(r.canvas, pad, menuHeaderY, "Library", hf, colorMenuHeader)
+
+	rowFace := r.fonts.face(r.fontChoice.regular, sizeMenuRow)
+	settings := r.settingsRows()
+	books := r.menuBooks()
+	scrollStart := menuScrollStart(r.menuState.Index)
+	y := menuFirstRowY
+
+	// Settings rows appear only before the list has scrolled.
+	if scrollStart == 0 {
+		for i, s := range settings {
+			r.drawMenuRow(y, i, fmt.Sprintf("%s: %s", s.label, s.value), rowFace, colorMuted)
+			y += menuRowHeight
+		}
+	}
+
+	n := SettingsRowCount
+	for i := scrollStart; i < len(books); i++ {
+		if y > menuBottomY {
+			break
+		}
+		prefix, col := r.bookRowStyle(i, books[i])
+		label := prefix + bookTitle(books[i])
+		r.drawMenuRow(y, i+n, ellipsize(rowFace, label, panelWidth-2*pad-6), rowFace, col)
+		y += menuRowHeight
 	}
 }
 
-// wrapText greedily word-wraps s into at most maxLines lines of at most maxChars
-// characters each, hard-splitting any single word longer than maxChars. If the
-// text still doesn't fit, the last shown line ends with "..." to signal more.
-func wrapText(s string, maxChars, maxLines int) []string {
-	var lines []string
-	cur := ""
-	push := func() {
-		if cur != "" {
-			lines = append(lines, cur)
-			cur = ""
-		}
+// drawMenuRow draws one menu row, highlighting it when it is the selection.
+func (r *Renderer) drawMenuRow(y, index int, text string, face font.Face, col color.RGBA) {
+	if index == r.menuState.Index {
+		fillRect(r.canvas, 0, y-menuRowHeight+8, panelWidth, menuRowHeight, colorPanel)
+		fillRect(r.canvas, 0, y-menuRowHeight+8, 3, menuRowHeight, colorMenuSelBar)
+		col = colorMenuSel
 	}
-	for _, w := range strings.Fields(s) {
-		for len(w) > maxChars { // hard-split a word wider than the screen
-			push()
-			lines = append(lines, w[:maxChars])
-			w = w[maxChars:]
-		}
-		switch {
-		case cur == "":
-			cur = w
-		case len(cur)+1+len(w) <= maxChars:
-			cur += " " + w
-		default:
-			push()
-			cur = w
-		}
-	}
-	push()
-
-	if len(lines) == 0 {
-		return []string{""}
-	}
-	if len(lines) <= maxLines {
-		return lines
-	}
-	lines = lines[:maxLines]
-	last := lines[maxLines-1]
-	if len(last) > maxChars-3 {
-		last = last[:maxChars-3]
-	}
-	lines[maxLines-1] = last + "..."
-	return lines
+	drawText(r.canvas, pad, y, text, face, col)
 }
 
-func (r *Renderer) drawChapterTitle(title string) {
-	if title == "" {
-		return
+// menuBooks returns the audiobook list carried on the menu state, or nil when
+// the payload is missing or of an unexpected type.
+func (r *Renderer) menuBooks() []library.Audiobook {
+	books, ok := r.menuState.Books.([]library.Audiobook)
+	if !ok {
+		return nil
 	}
-	addLabel(r.canvas, 10, 70, truncate(title, 40), colorChapter)
+	return books
 }
 
-func (r *Renderer) drawStatus(idle bool) {
-	status := "Paused"
+// menuScrollStart returns the first list row to draw so the selected item stays
+// on screen once the selection moves past the visible window.
+func menuScrollStart(index int) int {
+	const visibleBeforeSelection = 5
+	if index > visibleBeforeSelection {
+		return index - visibleBeforeSelection
+	}
+	return 0
+}
+
+// timeoutLabel renders the screen-timeout setting; non-positive means off.
+func timeoutLabel(minutes int) string {
+	if minutes <= 0 {
+		return "Off"
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
+// bookRowStyle returns the marker prefix and color for book row i: the selected
+// row wins, then the currently-playing book, then a plain row. Selection is
+// offset by the settings rows drawn above the list.
+func (r *Renderer) bookRowStyle(i int, b library.Audiobook) (string, color.RGBA) {
 	switch {
-	case idle:
-		status = "Idle"
-	case !r.playState.Paused:
-		status = "Playing"
+	case i+SettingsRowCount == r.menuState.Index:
+		return "> ", colorText
+	case filepath.Base(b.FilePath) == filepath.Base(r.playState.FilePath):
+		return "* ", colorStatus
+	default:
+		return "  ", colorMuted
 	}
-
-	if r.encoderMode == "scrub" {
-		status += "  |  Mode: Scrub"
-	} else {
-		status += fmt.Sprintf("  |  Vol: %d%%", int(r.playState.Volume))
-	}
-	addLabel(r.canvas, 10, 110, status, colorStatus)
 }
 
-func (r *Renderer) drawChapterProgress(chapter chapterInfo) {
-	dur := chapter.end - chapter.start
-	if dur <= 0 {
-		return
+// bookTitle returns the display title for a book, falling back to the file's
+// base name.
+func bookTitle(b library.Audiobook) string {
+	if b.Title != "" {
+		return b.Title
 	}
-	pct := clamp01((r.playState.Position - chapter.start) / dur)
-
-	const barWidth = 300
-	fillRect(r.canvas, 10, 150, barWidth, 10, colorBarTrack)
-	fillRect(r.canvas, 10, 150, int(float64(barWidth)*pct), 10, colorBarFill)
+	return filepath.Base(b.FilePath)
 }
 
-// drawTimes shows chapter and whole-book progress. Each line reads
-// elapsed / total  -remaining, so the listener can see both how far into the
-// book they are and how much is left at a glance (bug 6).
-func (r *Renderer) drawTimes(chapter chapterInfo, bookDur float64) {
-	chapPos := nonNeg(r.playState.Position - chapter.start)
-	chapDur := chapter.end - chapter.start
-	addLabel(r.canvas, 10, 180,
-		fmt.Sprintf("Chapter %s / %s  -%s",
-			formatMinSec(chapPos), formatMinSec(chapDur), formatMinSec(nonNeg(chapDur-chapPos))),
-		colorMuted)
-
-	bookPos := nonNeg(r.playState.Position)
-	addLabel(r.canvas, 10, 200,
-		fmt.Sprintf("Book %s / %s  -%s",
-			formatHourMin(bookPos), formatHourMin(bookDur), formatHourMin(nonNeg(bookDur-bookPos))),
-		colorFaint)
-}
-
-// nonNeg clamps a duration to zero so end-of-file rounding can't show "-00:01".
-func nonNeg(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	return v
-}
+// ---- helpers ----
 
 // fillRect paints a solid w×h rectangle with its top-left corner at (x, y).
 func fillRect(img *image.RGBA, x, y, w, h int, c color.RGBA) {
 	draw.Draw(img, image.Rect(x, y, x+w, y+h), &image.Uniform{c}, image.Point{}, draw.Src)
-}
-
-// truncate shortens s to at most max bytes, replacing the tail with "..." when
-// it would otherwise overflow.
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
 }
 
 // clamp01 constrains v to the [0, 1] range.
@@ -662,34 +648,17 @@ func formatHourMin(seconds float64) string {
 	return fmt.Sprintf("%02dh%02dm", s/3600, (s%3600)/60)
 }
 
-func addLabel(img *image.RGBA, x, y int, label string, col color.RGBA) {
-	point := fixed.Point26_6{X: fixed.I(x), Y: fixed.I(y)}
-	d := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(col),
-		Face: basicfont.Face7x13,
-		Dot:  point,
-	}
-	d.DrawString(label)
-}
-
 func (r *Renderer) drawWiFiIcon(x, y int, connected bool) {
-	// Draw a simple antenna/signal icon
-	col := color.RGBA{100, 255, 100, 255}
+	col := colorWifiOn
 	if !connected {
-		col = color.RGBA{255, 100, 100, 255}
+		col = colorWifiOff
 	}
-
-	// Draw 3 vertical bars like a signal meter
 	fillRect(r.canvas, x, y+6, 2, 4, col)
 	fillRect(r.canvas, x+4, y+3, 2, 7, col)
 	fillRect(r.canvas, x+8, y, 2, 10, col)
-
 	if !connected {
-		// Draw a red 'X' or crossout over it
-		c := color.RGBA{255, 0, 0, 255}
-		fillRect(r.canvas, x-1, y+4, 12, 2, c)
-		fillRect(r.canvas, x+4, y-1, 2, 12, c)
+		fillRect(r.canvas, x-1, y+4, 12, 2, colorWifiOff)
+		fillRect(r.canvas, x+4, y-1, 2, 12, colorWifiOff)
 	}
 }
 
@@ -706,13 +675,11 @@ func copyToRGB565(dst []byte, src *image.RGBA) {
 			b := src.Pix[srcOffset+2]
 			srcOffset += 4
 
-			// RGB565 encoding
 			r5 := uint16(r) >> 3
 			g6 := uint16(g) >> 2
 			b5 := uint16(b) >> 3
 			rgb565 := (r5 << 11) | (g6 << 5) | b5
 
-			// Little-endian order for the framebuffer
 			dst[offset] = byte(rgb565)
 			dst[offset+1] = byte(rgb565 >> 8)
 			offset += 2
@@ -725,5 +692,5 @@ func (r *Renderer) SetEncoderMode(mode string) {
 	r.mu.Lock()
 	r.encoderMode = mode
 	r.mu.Unlock()
-	r.requestRender()
+	r.render()
 }

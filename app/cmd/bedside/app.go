@@ -22,6 +22,7 @@ type App struct {
 
 	// State
 	encoderMode       string // "vol" or "scrub"
+	fontID            string // UI typeface, cycled from the settings menu
 	inMenu            bool
 	menuIndex         int
 	menuBooks         []library.Audiobook
@@ -44,6 +45,7 @@ func NewApp(b *bus.Bus, lib *library.Manager, gui *ui.Renderer, p *player.Player
 		inMenu:            sysState.ActiveFile == "",
 		screenTimeoutMins: sysState.Timeout,
 		encoderMode:       sysState.EncoderMode,
+		fontID:            sysState.Font,
 	}
 
 	if a.encoderMode != "vol" && a.encoderMode != "scrub" {
@@ -52,6 +54,7 @@ func NewApp(b *bus.Bus, lib *library.Manager, gui *ui.Renderer, p *player.Player
 
 	_ = p.SetVolume(sysState.Volume)
 	a.gui.SetEncoderMode(a.encoderMode)
+	a.gui.SetFont(a.fontID)
 
 	return a
 }
@@ -137,30 +140,48 @@ func (a *App) handlePlayPause() {
 		return
 	}
 	if a.inMenu {
-		if a.menuIndex > 0 && a.menuIndex-1 < len(a.menuBooks) {
-			book := a.menuBooks[a.menuIndex-1]
-			a.player.LoadFile(book.FilePath)
-			a.inMenu = false
-			a.publishMenu()
-		}
+		a.activateMenuRow()
 	} else {
 		a.player.TogglePause()
 	}
 }
 
+// activateMenuRow acts on the selected menu row: settings rows cycle their
+// value; book rows load the book and close the menu.
+func (a *App) activateMenuRow() {
+	if a.menuIndex < ui.SettingsRowCount {
+		a.activateSetting(a.menuIndex)
+		return
+	}
+	bookIdx := a.menuIndex - ui.SettingsRowCount
+	if bookIdx >= 0 && bookIdx < len(a.menuBooks) {
+		a.player.LoadFile(a.menuBooks[bookIdx].FilePath)
+		a.inMenu = false
+		a.publishMenu()
+	}
+}
+
+// activateSetting cycles the settings row at idx (order matches the renderer's
+// settingsRows: 0 = screen timeout, 1 = font).
+func (a *App) activateSetting(idx int) {
+	switch idx {
+	case 0:
+		a.cycleScreenTimeout()
+	case 1:
+		a.cycleFont()
+	}
+}
+
+// menuMaxIndex is the highest selectable menu row (last book, or last settings
+// row when the library is empty).
+func (a *App) menuMaxIndex() int {
+	return ui.SettingsRowCount + len(a.menuBooks) - 1
+}
+
 func (a *App) handleEncoderSingleClick() {
 	// Edge case: single click does not wake screen, so it doesn't matter if it's off.
 	if a.inMenu && !a.screenOff {
-		if a.menuIndex == 0 {
-			a.cycleScreenTimeout()
-		} else if len(a.menuBooks) > 0 {
-			bookIdx := a.menuIndex - 1
-			if bookIdx >= 0 && bookIdx < len(a.menuBooks) {
-				a.player.LoadFile(a.menuBooks[bookIdx].FilePath)
-				a.inMenu = false
-				a.publishMenu()
-			}
-		}
+		a.activateMenuRow()
 	} else {
 		a.handleEncoderToggle()
 	}
@@ -192,6 +213,16 @@ func (a *App) cycleScreenTimeout() {
 	_ = a.lib.SaveSystemState(sysState)
 	a.resetScreen(true)
 	a.publishMenu()
+}
+
+// cycleFont advances to the next bundled typeface, persists it, and repaints.
+func (a *App) cycleFont() {
+	a.fontID = ui.NextFontID(a.fontID)
+	sysState, _ := a.lib.GetSystemState()
+	sysState.Font = a.fontID
+	_ = a.lib.SaveSystemState(sysState)
+	a.gui.SetFont(a.fontID)
+	a.publishMenu() // refresh the Font row's displayed value
 }
 
 func (a *App) handleScreenTimeout() {
@@ -256,7 +287,7 @@ func (a *App) handleSkipBack() {
 		return
 	}
 	if a.inMenu {
-		if a.menuIndex < len(a.menuBooks) {
+		if a.menuIndex < a.menuMaxIndex() {
 			a.menuIndex++
 			a.publishMenu()
 		}
@@ -274,10 +305,10 @@ func (a *App) handleMenu() {
 	if a.inMenu {
 		a.menuBooks, _ = a.lib.GetAll()
 		currentPath := a.player.State.FilePath
-		a.menuIndex = 1 // 0 is settings
+		a.menuIndex = ui.SettingsRowCount // default to the first book row
 		for i, b := range a.menuBooks {
 			if filepath.Base(b.FilePath) == filepath.Base(currentPath) {
-				a.menuIndex = i + 1
+				a.menuIndex = i + ui.SettingsRowCount
 				break
 			}
 		}
@@ -325,7 +356,7 @@ func (a *App) handleEncoderTurn(delta int) {
 }
 
 func (a *App) handleMenuScroll(delta int) {
-	if delta > 0 && a.menuIndex < len(a.menuBooks) {
+	if delta > 0 && a.menuIndex < a.menuMaxIndex() {
 		a.menuIndex++
 		a.publishMenu()
 	} else if delta < 0 && a.menuIndex > 0 {

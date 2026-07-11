@@ -42,27 +42,6 @@ func TestPickPanelFB(t *testing.T) {
 	})
 }
 
-func TestTruncate(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		max  int
-		want string
-	}{
-		{"shorter than max", "hello", 44, "hello"},
-		{"equal to max", "abcd", 4, "abcd"},
-		{"one over max", "abcde", 4, "a..."},
-		{"long title", "The Fellowship of the Ring and Then Some More", 44, "The Fellowship of the Ring and Then Some ..."},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := truncate(tc.in, tc.max); got != tc.want {
-				t.Errorf("truncate(%q, %d) = %q, want %q", tc.in, tc.max, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestClamp01(t *testing.T) {
 	cases := []struct {
 		in   float64
@@ -244,7 +223,7 @@ func TestBookTitle(t *testing.T) {
 	}{
 		{"uses title", library.Audiobook{Title: "Dune"}, "Dune"},
 		{"falls back to basename", library.Audiobook{FilePath: "/audio/dune.m4b"}, "dune.m4b"},
-		{"truncates long title", library.Audiobook{Title: "A Really Very Long Audiobook Title That Overflows"}, "A Really Very Long Audiobook Title That..."},
+		{"long title returned as-is (wrapping/ellipsis happen at render)", library.Audiobook{Title: "A Really Very Long Audiobook Title That Overflows"}, "A Really Very Long Audiobook Title That Overflows"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,8 +270,9 @@ func TestRenderer_BookRowStyle(t *testing.T) {
 	other := library.Audiobook{FilePath: "/audio/other.m4b"}
 
 	t.Run("selected row", func(t *testing.T) {
-		r := &Renderer{menuState: bus.MenuState{Index: 2}}
-		prefix, c := r.bookRowStyle(1, other) // row 1 => menu index 2
+		// Book row i is selected when menuIndex == i + SettingsRowCount.
+		r := &Renderer{menuState: bus.MenuState{Index: 1 + SettingsRowCount}}
+		prefix, c := r.bookRowStyle(1, other)
 		if prefix != "> " || c != colorText {
 			t.Errorf("got (%q, %v), want (\"> \", colorText)", prefix, c)
 		}
@@ -304,8 +284,8 @@ func TestRenderer_BookRowStyle(t *testing.T) {
 			playState: player.PlaybackState{FilePath: "current.m4b"},
 		}
 		prefix, c := r.bookRowStyle(0, playing)
-		if prefix != "* " || c != colorNowPlaying {
-			t.Errorf("got (%q, %v), want (\"* \", colorNowPlaying)", prefix, c)
+		if prefix != "* " || c != colorStatus {
+			t.Errorf("got (%q, %v), want (\"* \", colorStatus)", prefix, c)
 		}
 	})
 
@@ -319,7 +299,7 @@ func TestRenderer_BookRowStyle(t *testing.T) {
 
 	t.Run("selection wins over playing", func(t *testing.T) {
 		r := &Renderer{
-			menuState: bus.MenuState{Index: 1},
+			menuState: bus.MenuState{Index: 0 + SettingsRowCount},
 			playState: player.PlaybackState{FilePath: "current.m4b"},
 		}
 		prefix, _ := r.bookRowStyle(0, playing) // selected AND playing

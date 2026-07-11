@@ -111,7 +111,9 @@ let
     pname = "bedside-app";
     version = "1.0.0";
     src = ../app; # Adjust path relative to this file
-    vendorHash = "sha256-jJLJ/WK+YHIcg+N+Jvp6v6RHQxw/XxvXL5MIQbarZns=";
+    # go.mod/go.sum come from ja-ui-refresh (the cover-hero UI), so its vendor
+    # hash is the correct one for the merged tree.
+    vendorHash = "sha256-Njsdcmf7MrNVCmxhdqNiJP/DK8dBNcoZuqUvpGuqV+8=";
     ldflags = [
       "-s"
       "-w"
