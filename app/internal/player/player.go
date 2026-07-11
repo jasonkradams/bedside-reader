@@ -109,9 +109,7 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Player, error) {
 
 	go p.listen()
 
-	// Observe properties so mpv tells us when they change. "pause" is observed so
-	// mpv remains the source of truth for play/pause state instead of the app
-	// optimistically guessing (which could desync the UI and the next toggle).
+	// Observing "pause" keeps mpv the source of truth for play state.
 	p.observeProperty("time-pos")
 	p.observeProperty("duration")
 	p.observeProperty("volume")
@@ -156,12 +154,9 @@ func (p *Player) handleEndFile(msg map[string]any) {
 
 	reason, _ := msg["reason"].(string)
 
-	// mpv emits end-file for the outgoing file whenever we load/replace a new one
-	// (reason "stop"/"redirect") and on shutdown ("quit"). Those are not real
-	// stops — the incoming file-loaded sets up the next file — so acting on them
-	// would clobber the new file's state (this is how switching books left the
-	// player desynced). Only a natural end ("eof") or a decode error ("error")
-	// means playback has actually stopped.
+	// Ignore end-file from our own load/replace (stop/redirect/quit) or while a
+	// load is in flight; only a real eof/error means playback stopped. Acting on
+	// the others clobbered the incoming file's state when switching books.
 	if p.loading || (reason != "eof" && reason != "error") {
 		log.Printf("player: ignoring end-file (reason=%q loading=%v)", reason, p.loading)
 		return
@@ -170,8 +165,7 @@ func (p *Player) handleEndFile(msg map[string]any) {
 	log.Printf("player: end-file reason=%q -> idle", reason)
 	p.isIdle = true
 	p.State.Paused = true
-	// Only reset progress to 0 if the file finished playing naturally.
-	if reason == "eof" {
+	if reason == "eof" { // finished naturally: rewind to the start
 		p.State.Position = 0
 		p.lib.SaveProgress(p.State.FilePath, 0)
 	}
@@ -204,9 +198,7 @@ func (p *Player) handlePropertyChange(msg map[string]any) {
 	}
 }
 
-// handlePauseChange records mpv's authoritative pause state and notifies the UI.
-// Because this reflects what mpv actually did, the status line can't lie and the
-// next TogglePause decision is made from reality rather than an optimistic guess.
+// handlePauseChange records mpv's authoritative pause state.
 func (p *Player) handlePauseChange(paused bool) {
 	p.reqMutex.Lock()
 	p.State.Paused = paused
@@ -293,9 +285,7 @@ func (p *Player) LoadFile(path string) error {
 	p.loadNewState(path)
 	p.muteForTransition()
 
-	// Optimistically show "playing": unlike pause/resume, a fresh load must not
-	// wait for the pause observation, because mpv may already be unpaused (no
-	// change event would arrive) when resuming from an idle or ended state.
+	// Optimistic: a fresh load may not emit a pause event to clear this.
 	p.State.Paused = false
 	p.bus.Publish(bus.EventPlayerStateChanged, p.State)
 	_ = p.sendCommand("set_property", "pause", false)
@@ -303,8 +293,8 @@ func (p *Player) LoadFile(path string) error {
 	return p.sendCommand("loadfile", path, "replace")
 }
 
-// setLoading marks whether a loadfile is in flight so handleEndFile can tell the
-// outgoing file's end-file (ignore it) from a genuine stop.
+// setLoading flags an in-flight loadfile so handleEndFile ignores the outgoing
+// file's end-file.
 func (p *Player) setLoading(v bool) {
 	p.reqMutex.Lock()
 	p.loading = v
@@ -371,9 +361,8 @@ func (p *Player) TogglePause() error {
 	} else {
 		p.pause()
 	}
-	// State.Paused is intentionally not set or published here: the observed
-	// "pause" property (handlePauseChange) reports what mpv actually did, so a
-	// dropped command can't leave the UI — or the next toggle — out of sync.
+	// Don't set State.Paused here; the observed pause property publishes the
+	// real state, so a dropped command can't desync the UI or the next toggle.
 	return nil
 }
 

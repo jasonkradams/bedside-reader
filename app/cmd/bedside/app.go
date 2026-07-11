@@ -101,9 +101,7 @@ func (a *App) resetScreen(wake bool) bool {
 		a.screenOff = false
 		display.SetBacklight(true)
 		if wasOff {
-			// Coming back from a blanked screen: redraw immediately so the panel
-			// shows current state rather than whatever frame was left when it slept.
-			a.refreshDisplay()
+			a.refreshDisplay() // don't show the stale frame left from before sleep
 		}
 	}
 
@@ -126,8 +124,7 @@ func (a *App) publishMenu() {
 	})
 }
 
-// refreshDisplay re-publishes current state so the UI redraws immediately, e.g.
-// when the screen wakes from a blanked idle and must not show a stale frame.
+// refreshDisplay re-publishes current state so the UI redraws immediately.
 func (a *App) refreshDisplay() {
 	a.gui.SetEncoderMode(a.encoderMode)
 	a.bus.Publish(bus.EventPlayerStateChanged, a.player.State)

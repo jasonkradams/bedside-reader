@@ -45,25 +45,28 @@ var (
 
 // Layout geometry for the 320x240 panel (cover-hero split).
 const (
-	pad       = 12
-	coverX    = pad
-	coverY    = 18
-	coverSize = 150
-	textX     = coverX + coverSize + 14 // right text column
-	textW     = panelWidth - textX - pad
-	progressY = 186
-	barH      = 6
-	timesY    = 208
-	statusY   = 230
+	pad        = 12
+	coverX     = pad
+	coverY     = 18
+	coverSize  = 150
+	textX      = coverX + coverSize + 14 // right text column
+	textW      = panelWidth - textX - pad
+	progressY  = 182
+	barH       = 6
+	chapTimesY = 203
+	bookTimesY = 218
+	statusY    = 233
+	wifiSlot   = 16 // space reserved for the bottom-right Wi-Fi icon
 )
 
 type Renderer struct {
-	bus    *bus.Bus
-	lib    *library.Manager
-	fbFile *os.File
-	mmap   []byte
-	canvas *image.RGBA
-	mu     sync.Mutex
+	bus       *bus.Bus
+	lib       *library.Manager
+	fbFile    *os.File
+	frame     []byte // RGB565 frame buffer, written to the panel each render
+	canvas    *image.RGBA
+	renderReq chan struct{} // coalesced render requests
+	mu        sync.Mutex
 
 	fonts      *fontManager
 	fontChoice FontChoice
@@ -179,14 +182,6 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 	}
 	log.Printf("UI rendering to panel framebuffer %s", fbPath)
 
-	// Memory map the framebuffer (320x240, 16-bit color = 153600 bytes)
-	fbSize := panelWidth * panelHeight * 2
-	mmap, err := unix.Mmap(int(fbFile.Fd()), 0, fbSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
-	if err != nil {
-		fbFile.Close()
-		return nil, fmt.Errorf("failed to mmap framebuffer: %w", err)
-	}
-
 	// Unblank the framebuffer
 	_, _, errno := unix.Syscall(unix.SYS_IOCTL, fbFile.Fd(), 0x4611, 0)
 	if errno != 0 {
@@ -200,23 +195,23 @@ func New(eventBus *bus.Bus, lib *library.Manager) (*Renderer, error) {
 		bus:        eventBus,
 		lib:        lib,
 		fbFile:     fbFile,
-		mmap:       mmap,
+		frame:      make([]byte, panelWidth*panelHeight*2),
 		canvas:     image.NewRGBA(image.Rect(0, 0, panelWidth, panelHeight)),
+		renderReq:  make(chan struct{}, 1),
 		fonts:      newFontManager(),
 		fontChoice: fontByID(defaultFontID),
 	}
 
+	go r.renderLoop()
 	go r.listen()
 	go r.pollWiFi()
-	r.render() // initial render
+	go r.periodicRefresh()
+	r.requestRender() // initial render
 
 	return r, nil
 }
 
 func (r *Renderer) Close() {
-	if r.mmap != nil {
-		unix.Munmap(r.mmap)
-	}
 	if r.fbFile != nil {
 		r.fbFile.Close()
 	}
@@ -227,7 +222,7 @@ func (r *Renderer) SetFont(id string) {
 	r.mu.Lock()
 	r.fontChoice = fontByID(id)
 	r.mu.Unlock()
-	r.render()
+	r.requestRender()
 }
 
 func (r *Renderer) pollWiFi() {
@@ -244,7 +239,7 @@ func (r *Renderer) pollWiFi() {
 		r.mu.Unlock()
 
 		if changed {
-			r.render()
+			r.requestRender()
 		}
 
 		time.Sleep(2 * time.Second)
@@ -273,8 +268,35 @@ func (r *Renderer) listen() {
 		}
 
 		if needsRender {
-			r.render()
+			r.requestRender()
 		}
+	}
+}
+
+// requestRender coalesces render requests: bursts collapse into one frame.
+func (r *Renderer) requestRender() {
+	select {
+	case r.renderReq <- struct{}{}:
+	default:
+	}
+}
+
+// renderLoop caps the refresh rate; requests during the sleep coalesce.
+func (r *Renderer) renderLoop() {
+	const minInterval = 66 * time.Millisecond // ~15 fps
+	for range r.renderReq {
+		r.render()
+		time.Sleep(minInterval)
+	}
+}
+
+// periodicRefresh redraws slowly when idle so the panel self-heals and reflects
+// current state after waking.
+func (r *Renderer) periodicRefresh() {
+	ticker := time.NewTicker(1500 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		r.requestRender()
 	}
 }
 
@@ -288,9 +310,26 @@ func (r *Renderer) render() {
 	if r.menuState.Active {
 		r.renderMenu()
 	}
-	r.drawWiFiIcon(panelWidth-20, 8, r.wifiConnected)
+	r.drawWiFiIcon(panelWidth-pad-10, statusY-9, r.wifiConnected)
 
-	copyToRGB565(r.mmap, r.canvas)
+	copyToRGB565(r.frame, r.canvas)
+	r.flush()
+}
+
+// flush writes the frame through the fbdev write path, not mmap: mmap dirty-page
+// tracking stops flushing the static top of the screen and freezes it.
+func (r *Renderer) flush() {
+	for off := 0; off < len(r.frame); {
+		n, err := r.fbFile.WriteAt(r.frame[off:], int64(off))
+		if err != nil {
+			log.Printf("framebuffer write failed at offset %d: %v", off, err)
+			return
+		}
+		if n <= 0 {
+			return
+		}
+		off += n
+	}
 }
 
 // idleTitle is shown on the player screen when no audiobook is loaded.
@@ -317,8 +356,19 @@ func (r *Renderer) renderPlayer() {
 		return
 	}
 	r.drawProgress(chapter)
-	r.drawTimes(chapter)
+	r.drawTimes(chapter, r.bookDuration(book))
 	r.drawStatus()
+}
+
+// bookDuration prefers mpv's live duration, falling back to library metadata.
+func (r *Renderer) bookDuration(book *library.Audiobook) float64 {
+	if r.playState.Duration > 0 {
+		return r.playState.Duration
+	}
+	if book != nil {
+		return book.Duration
+	}
+	return 0
 }
 
 // currentBook returns the library metadata for the loaded file, or nil when
@@ -382,26 +432,34 @@ func (r *Renderer) drawCover(title string) {
 	drawText(r.canvas, coverX+(coverSize-w)/2, coverY+coverSize/2+26, glyph, face, colorFaint)
 }
 
-// drawInfoColumn renders title / author / chapter in the right-hand column.
+// drawInfoColumn draws title / author / chapter. The title wraps to 4 lines;
+// author and chapter are dropped if they'd overrun the progress bar.
 func (r *Renderer) drawInfoColumn(book *library.Audiobook, title string, chapter chapterInfo) {
+	const maxY = progressY - 6
+
 	titleFace := r.fonts.face(r.fontChoice.bold, sizeTitle)
 	y := coverY + lineHeight(titleFace) - 2
-	for _, line := range wrapLines(titleFace, title, textW, 3) {
+	for _, line := range wrapLines(titleFace, title, textW, 4) {
 		drawText(r.canvas, textX, y, line, titleFace, colorText)
 		y += lineHeight(titleFace)
 	}
 
 	if book != nil && book.Author != "" {
 		af := r.fonts.face(r.fontChoice.regular, sizeBody)
-		y += 4
-		drawText(r.canvas, textX, y+lineHeight(af)-4, ellipsize(af, book.Author, textW), af, colorMuted)
-		y += lineHeight(af)
+		if y+lineHeight(af) <= maxY {
+			y += 4
+			drawText(r.canvas, textX, y+lineHeight(af)-4, ellipsize(af, book.Author, textW), af, colorMuted)
+			y += lineHeight(af)
+		}
 	}
 
 	if chapter.title != "" {
 		cf := r.fonts.face(r.fontChoice.regular, sizeChapter)
 		y += 8
 		for _, line := range wrapLines(cf, chapter.title, textW, 2) {
+			if y+lineHeight(cf) > maxY {
+				break
+			}
 			drawText(r.canvas, textX, y+lineHeight(cf)-4, line, cf, colorAccent)
 			y += lineHeight(cf)
 		}
@@ -462,15 +520,31 @@ func (r *Renderer) drawProgress(chapter chapterInfo) {
 	fillRect(r.canvas, kx-1, progressY-3, 3, barH+6, colorText)
 }
 
-func (r *Renderer) drawTimes(chapter chapterInfo) {
+// drawTimes shows chapter and whole-book rows as "elapsed / total" with the
+// remaining time on the right.
+func (r *Renderer) drawTimes(chapter chapterInfo, bookDur float64) {
 	face := r.fonts.face(r.fontChoice.regular, sizeSmall)
-	chapPos := r.playState.Position - chapter.start
-	chapDur := chapter.end - chapter.start
-	left := fmt.Sprintf("%s / %s", formatMinSec(chapPos), formatMinSec(chapDur))
-	drawText(r.canvas, pad, timesY, left, face, colorMuted)
 
-	right := formatHourMin(r.playState.Duration) + " total"
-	drawText(r.canvas, panelWidth-pad-textWidth(face, right), timesY, right, face, colorFaint)
+	chapPos := nonNeg(r.playState.Position - chapter.start)
+	chapDur := chapter.end - chapter.start
+	drawText(r.canvas, pad, chapTimesY,
+		fmt.Sprintf("Chapter %s / %s", formatMinSec(chapPos), formatMinSec(chapDur)), face, colorMuted)
+	drawRightText(r.canvas, panelWidth-pad, chapTimesY,
+		"-"+formatMinSec(nonNeg(chapDur-chapPos)), face, colorFaint)
+
+	bookPos := nonNeg(r.playState.Position)
+	drawText(r.canvas, pad, bookTimesY,
+		fmt.Sprintf("Book %s / %s", formatHourMin(bookPos), formatHourMin(bookDur)), face, colorMuted)
+	drawRightText(r.canvas, panelWidth-pad, bookTimesY,
+		"-"+formatHourMin(nonNeg(bookDur-bookPos)), face, colorFaint)
+}
+
+// nonNeg clamps negatives to zero.
+func nonNeg(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
 }
 
 func (r *Renderer) drawStatus() {
@@ -489,7 +563,7 @@ func (r *Renderer) drawStatus() {
 	} else {
 		right = fmt.Sprintf("Vol %d%%", int(r.playState.Volume))
 	}
-	drawText(r.canvas, panelWidth-pad-textWidth(face, right), statusY, right, face, colorMuted)
+	drawRightText(r.canvas, panelWidth-pad-wifiSlot, statusY, right, face, colorMuted)
 }
 
 // ---- Library / settings menu ----
@@ -692,5 +766,5 @@ func (r *Renderer) SetEncoderMode(mode string) {
 	r.mu.Lock()
 	r.encoderMode = mode
 	r.mu.Unlock()
-	r.render()
+	r.requestRender()
 }

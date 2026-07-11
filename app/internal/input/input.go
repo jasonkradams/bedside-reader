@@ -29,9 +29,9 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 	return m, nil
 }
 
-// setupButtons wires the Display HAT Mini buttons to their bus events, spawning
-// a watcher goroutine per pin. Missing or unconfigurable pins are logged and
-// skipped so a partially-connected HAT still works.
+// setupButtons wires the Display HAT Mini buttons. Each watcher blocks on a
+// falling edge (press) via the GPIO chardev instead of polling, so idle input
+// costs no CPU. Missing or unconfigurable pins are logged and skipped.
 func (m *InputManager) setupButtons() {
 	buttons := []struct {
 		Name  string
@@ -50,7 +50,7 @@ func (m *InputManager) setupButtons() {
 			log.Printf("Warning: Failed to find pin %s", b.Pin)
 			continue
 		}
-		if err := pin.In(gpio.PullUp, gpio.NoEdge); err != nil {
+		if err := pin.In(gpio.PullUp, gpio.FallingEdge); err != nil {
 			log.Printf("Warning: Failed to set pin %s to input: %v", b.Pin, err)
 			continue
 		}
@@ -58,8 +58,9 @@ func (m *InputManager) setupButtons() {
 	}
 }
 
-// setupEncoder wires the rotary encoder (GPIO 4, 20, 23) and spawns its watcher
-// goroutines. If any of the three pins is missing, the encoder is skipped.
+// setupEncoder wires the rotary encoder (GPIO 4, 20, 23). A is watched on both
+// edges for quadrature; the push button waits on a falling edge. If any of the
+// three pins is missing, the encoder is skipped.
 func (m *InputManager) setupEncoder() {
 	pinA := gpioreg.ByName("GPIO4")
 	pinB := gpioreg.ByName("GPIO20")
@@ -70,59 +71,62 @@ func (m *InputManager) setupEncoder() {
 		return
 	}
 
-	pinA.In(gpio.PullUp, gpio.NoEdge)
-	pinB.In(gpio.PullUp, gpio.NoEdge)
-	pinBtn.In(gpio.PullUp, gpio.NoEdge)
+	if err := pinA.In(gpio.PullUp, gpio.BothEdges); err != nil {
+		log.Printf("Warning: encoder pin A: %v", err)
+		return
+	}
+	if err := pinB.In(gpio.PullUp, gpio.NoEdge); err != nil {
+		log.Printf("Warning: encoder pin B: %v", err)
+		return
+	}
+	if err := pinBtn.In(gpio.PullUp, gpio.FallingEdge); err != nil {
+		log.Printf("Warning: encoder button: %v", err)
+		return
+	}
 
 	go m.watchEncoder(pinA, pinB)
 	go m.watchButton(pinBtn, bus.EventEncoderBtn)
 }
 
-func (m *InputManager) watchEncoder(pinA, pinB gpio.PinIO) {
-	// Simple quadrature decoder using polling
-	lastA := pinA.Read()
-	lastB := pinB.Read()
+// buttonDebounce drops edges closer together than this (contact bounce), while
+// still allowing fast double-clicks.
+const buttonDebounce = 60 * time.Millisecond
 
+// watchButton blocks until a falling edge (press) and publishes event.
+func (m *InputManager) watchButton(pin gpio.PinIO, event bus.EventType) {
+	var last time.Time
 	for {
-		time.Sleep(2 * time.Millisecond) // Fast 2ms polling loop for accurate quadrature
-
-		a := pinA.Read()
-		b := pinB.Read()
-
-		if a != lastA || b != lastB {
-			// If state changed
-			if a == gpio.Low && lastA == gpio.High {
-				// Falling edge on A
-				if b == gpio.High {
-					// Clockwise
-					m.bus.Publish(bus.EventEncoderTurn, 1)
-				} else {
-					// Counter-clockwise
-					m.bus.Publish(bus.EventEncoderTurn, -1)
-				}
-			}
-			lastA = a
-			lastB = b
+		if !pin.WaitForEdge(-1) {
+			time.Sleep(10 * time.Millisecond) // guard against a hot loop if edges error
+			continue
 		}
+		if pin.Read() != gpio.Low {
+			continue // released before we read
+		}
+		now := time.Now()
+		if now.Sub(last) < buttonDebounce {
+			continue
+		}
+		last = now
+		m.bus.Publish(event, nil)
 	}
 }
 
-func (m *InputManager) watchButton(pin gpio.PinIO, event bus.EventType) {
-	wasPressed := false
-	var lastPress time.Time
-
+// watchEncoder decodes quadrature: on A's falling edge, B's level gives the
+// direction.
+func (m *InputManager) watchEncoder(pinA, pinB gpio.PinIO) {
 	for {
-		isPressed := pin.Read() == gpio.Low
-		now := time.Now()
-
-		if isPressed && !wasPressed {
-			// Debounce: only register if it's been at least 50ms since last press
-			if now.Sub(lastPress) > 50*time.Millisecond {
-				m.bus.Publish(event, nil)
-				lastPress = now
-			}
+		if !pinA.WaitForEdge(-1) {
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
-		wasPressed = isPressed
-		time.Sleep(5 * time.Millisecond) // poll every 5ms to catch fast double clicks
+		if pinA.Read() != gpio.Low {
+			continue // act on the falling edge only
+		}
+		if pinB.Read() == gpio.High {
+			m.bus.Publish(bus.EventEncoderTurn, 1) // clockwise
+		} else {
+			m.bus.Publish(bus.EventEncoderTurn, -1) // counter-clockwise
+		}
 	}
 }

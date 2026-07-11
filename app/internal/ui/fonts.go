@@ -44,7 +44,7 @@ const defaultFontID = "plex-serif"
 // Text sizes (px; the face cache renders at DPI 72 so 1pt == 1px). Tuned for the
 // 320x240 panel; adjust here and every screen follows.
 const (
-	sizeTitle   = 22
+	sizeTitle   = 18 // smaller so long titles fit the narrow column in more lines
 	sizeChapter = 15
 	sizeBody    = 14
 	sizeSmall   = 12
@@ -150,6 +150,11 @@ func drawText(dst *image.RGBA, x, y int, s string, face font.Face, col color.RGB
 // textWidth returns the rendered pixel width of s in face.
 func textWidth(face font.Face, s string) int {
 	return font.MeasureString(face, s).Round()
+}
+
+// drawRightText draws s so it ends at x (baseline y).
+func drawRightText(dst *image.RGBA, x, y int, s string, face font.Face, col color.RGBA) {
+	drawText(dst, x-textWidth(face, s), y, s, face, col)
 }
 
 // lineHeight returns a sensible line advance (ascent+descent) for face, in px.
