@@ -93,10 +93,13 @@ func (m *InputManager) setupEncoder() {
 const buttonDebounce = 60 * time.Millisecond
 
 // watchButton blocks until a falling edge (press) and publishes event.
+//
+// The timeout is 0, not -1: the gpioioctl driver treats the value as a read
+// deadline, so 0 means "wait forever" while a negative value times out at once.
 func (m *InputManager) watchButton(pin gpio.PinIO, event bus.EventType) {
 	var last time.Time
 	for {
-		if !pin.WaitForEdge(-1) {
+		if !pin.WaitForEdge(0) {
 			time.Sleep(10 * time.Millisecond) // guard against a hot loop if edges error
 			continue
 		}
@@ -116,7 +119,7 @@ func (m *InputManager) watchButton(pin gpio.PinIO, event bus.EventType) {
 // direction.
 func (m *InputManager) watchEncoder(pinA, pinB gpio.PinIO) {
 	for {
-		if !pinA.WaitForEdge(-1) {
+		if !pinA.WaitForEdge(0) { // 0 = wait forever (see watchButton)
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
