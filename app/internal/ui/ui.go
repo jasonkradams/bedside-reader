@@ -80,6 +80,7 @@ type Renderer struct {
 	menuState     bus.MenuState
 	encoderMode   string
 	wifiConnected bool
+	lastTickSec   int // whole-second of the last progress-driven render
 }
 
 // Panel geometry: 320x240 ST7789 in landscape, 16bpp (RGB565).
@@ -251,10 +252,20 @@ func (r *Renderer) listen() {
 	for ev := range ch {
 		needsRender := false
 		switch ev.Type {
-		case bus.EventPlayerStateChanged, bus.EventPlayerProgressTick:
+		case bus.EventPlayerStateChanged:
 			if state, ok := ev.Payload.(player.PlaybackState); ok {
 				r.playState = state
 				needsRender = true
+			}
+		case bus.EventPlayerProgressTick:
+			// Ticks arrive many times a second but the on-screen times change
+			// once a second; only repaint on the whole-second boundary.
+			if state, ok := ev.Payload.(player.PlaybackState); ok {
+				r.playState = state
+				if sec := int(state.Position); sec != r.lastTickSec {
+					r.lastTickSec = sec
+					needsRender = true
+				}
 			}
 		case bus.EventMenuUpdate:
 			if state, ok := ev.Payload.(bus.MenuState); ok {
