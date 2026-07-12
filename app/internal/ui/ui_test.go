@@ -308,3 +308,73 @@ func TestRenderer_BookRowStyle(t *testing.T) {
 		}
 	})
 }
+
+func TestNonNeg(t *testing.T) {
+	for _, tc := range []struct{ in, want float64 }{{-5, 0}, {-0.1, 0}, {0, 0}, {5, 5}} {
+		if got := nonNeg(tc.in); got != tc.want {
+			t.Errorf("nonNeg(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRenderer_BookDuration(t *testing.T) {
+	cases := []struct {
+		name     string
+		duration float64
+		book     *library.Audiobook
+		want     float64
+	}{
+		{"prefers live stream duration", 100, &library.Audiobook{Duration: 200}, 100},
+		{"falls back to book metadata", 0, &library.Audiobook{Duration: 200}, 200},
+		{"zero when nothing is known", 0, nil, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Renderer{playState: player.PlaybackState{Duration: tc.duration}}
+			if got := r.bookDuration(tc.book); got != tc.want {
+				t.Errorf("bookDuration() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderer_ChapterLabel(t *testing.T) {
+	book := &library.Audiobook{Chapters: []library.Chapter{{StartTime: 0}, {StartTime: 100}, {StartTime: 200}}}
+	cases := []struct {
+		name     string
+		book     *library.Audiobook
+		chapter  chapterInfo
+		position float64
+		want     string
+	}{
+		{"named chapter uses its title", book, chapterInfo{title: "The Cave"}, 150, "The Cave"},
+		{"unnamed chapter shows number", book, chapterInfo{}, 150, "Chapter 2 of 3"},
+		{"no book yields empty", nil, chapterInfo{}, 0, ""},
+		{"before first chapter yields empty",
+			&library.Audiobook{Chapters: []library.Chapter{{StartTime: 50}}}, chapterInfo{}, 10, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Renderer{playState: player.PlaybackState{Position: tc.position}}
+			if got := r.chapterLabel(tc.book, tc.chapter); got != tc.want {
+				t.Errorf("chapterLabel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderer_TickNeedsRepaint(t *testing.T) {
+	r := &Renderer{}
+	if !r.tickNeedsRepaint(5.0) {
+		t.Error("first tick at a new second should repaint")
+	}
+	if r.tickNeedsRepaint(5.4) {
+		t.Error("same second should not repaint")
+	}
+	if r.tickNeedsRepaint(5.9) {
+		t.Error("still same second should not repaint")
+	}
+	if !r.tickNeedsRepaint(6.0) {
+		t.Error("crossing to a new second should repaint")
+	}
+}

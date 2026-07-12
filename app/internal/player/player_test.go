@@ -2,11 +2,13 @@ package player
 
 import (
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jasonkradams/bedside-reader/internal/bus"
+	"github.com/jasonkradams/bedside-reader/internal/library"
 )
 
 func TestMpvArgs_UsesExplicitAudioDevice(t *testing.T) {
@@ -99,5 +101,81 @@ func TestPlayer_Success_HandleTimePosUpdatesPosition(t *testing.T) {
 
 	if p.State.Position != 42.5 {
 		t.Errorf("fail: expected Position to be updated to 42.5, got %v", p.State.Position)
+	}
+}
+
+// newTestPlayer builds a Player wired to a bus and a temp on-disk library, for
+// exercising handlers that persist state.
+func newTestPlayer(t *testing.T) *Player {
+	t.Helper()
+	dir := t.TempDir()
+	b := bus.New()
+	lib, err := library.New(b, filepath.Join(dir, "l.db"), filepath.Join(dir, "a"), filepath.Join(dir, "c"))
+	if err != nil {
+		t.Fatalf("library.New: %v", err)
+	}
+	t.Cleanup(lib.Close)
+	return &Player{bus: b, lib: lib}
+}
+
+// TestPlayer_HandleEndFile covers the end-of-book / book-switch fixes: only a
+// natural eof or a decode error stops playback; end-file caused by our own
+// load/replace (stop/redirect) or arriving mid-load must be ignored so it can't
+// clobber the incoming file's state.
+func TestPlayer_HandleEndFile(t *testing.T) {
+	cases := []struct {
+		name       string
+		reason     string
+		loading    bool
+		wantIdle   bool
+		wantPaused bool
+		wantRewind bool
+	}{
+		{"eof rewinds and idles", "eof", false, true, true, true},
+		{"error idles without rewind", "error", false, true, true, false},
+		{"stop from our own load is ignored", "stop", false, false, false, false},
+		{"redirect is ignored", "redirect", false, false, false, false},
+		{"eof during a load is ignored", "eof", true, false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newTestPlayer(t)
+			p.loading = tc.loading
+			p.State = PlaybackState{FilePath: "b.m4b", Paused: false, Position: 123}
+
+			p.handleEndFile(map[string]any{"event": "end-file", "reason": tc.reason})
+
+			if p.isIdle != tc.wantIdle {
+				t.Errorf("isIdle = %v, want %v", p.isIdle, tc.wantIdle)
+			}
+			if p.State.Paused != tc.wantPaused {
+				t.Errorf("Paused = %v, want %v", p.State.Paused, tc.wantPaused)
+			}
+			if rewound := p.State.Position == 0; rewound != tc.wantRewind {
+				t.Errorf("Position = %v (rewound=%v), want rewind=%v", p.State.Position, rewound, tc.wantRewind)
+			}
+		})
+	}
+}
+
+// TestPlayer_HandlePauseChange verifies the observed pause property is the source
+// of truth: it updates State and notifies the UI.
+func TestPlayer_HandlePauseChange(t *testing.T) {
+	b := bus.New()
+	sub := b.Subscribe()
+	p := &Player{bus: b, State: PlaybackState{Paused: false}}
+
+	p.handlePauseChange(true)
+
+	if !p.State.Paused {
+		t.Error("State.Paused = false, want true after observing pause=true")
+	}
+	select {
+	case ev := <-sub:
+		if ev.Type != bus.EventPlayerStateChanged {
+			t.Errorf("published %q, want %q", ev.Type, bus.EventPlayerStateChanged)
+		}
+	case <-time.After(time.Second):
+		t.Error("no state-changed event published on pause change")
 	}
 }
