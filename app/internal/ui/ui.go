@@ -43,19 +43,20 @@ var (
 	colorWifiOff    = color.RGBA{150, 90, 74, 255}
 )
 
-// Layout geometry for the 320x240 panel (cover-hero split).
+// Layout geometry for the 320x240 panel (cover-hero split). Small margins and a
+// large cover so the content uses the whole screen.
 const (
-	pad        = 12
+	pad        = 6
 	coverX     = pad
-	coverY     = 18
-	coverSize  = 150
-	textX      = coverX + coverSize + 14 // right text column
+	coverY     = 6
+	coverSize  = 166
+	textX      = coverX + coverSize + 10 // right text column
 	textW      = panelWidth - textX - pad
-	progressY  = 182
+	progressY  = 180
 	barH       = 6
-	chapTimesY = 203
-	bookTimesY = 218
-	statusY    = 233
+	chapTimesY = 200
+	bookTimesY = 216
+	statusY    = 232
 	wifiSlot   = 16 // space reserved for the bottom-right Wi-Fi icon
 )
 
@@ -258,14 +259,9 @@ func (r *Renderer) listen() {
 				needsRender = true
 			}
 		case bus.EventPlayerProgressTick:
-			// Ticks arrive many times a second but the on-screen times change
-			// once a second; only repaint on the whole-second boundary.
 			if state, ok := ev.Payload.(player.PlaybackState); ok {
 				r.playState = state
-				if sec := int(state.Position); sec != r.lastTickSec {
-					r.lastTickSec = sec
-					needsRender = true
-				}
+				needsRender = r.tickNeedsRepaint(state.Position)
 			}
 		case bus.EventMenuUpdate:
 			if state, ok := ev.Payload.(bus.MenuState); ok {
@@ -282,6 +278,17 @@ func (r *Renderer) listen() {
 			r.requestRender()
 		}
 	}
+}
+
+// tickNeedsRepaint reports whether a progress tick at pos should repaint: only
+// when the displayed whole-second changes (ticks arrive far more often). Updates
+// the tracked second as a side effect.
+func (r *Renderer) tickNeedsRepaint(pos float64) bool {
+	if sec := int(pos); sec != r.lastTickSec {
+		r.lastTickSec = sec
+		return true
+	}
+	return false
 }
 
 // requestRender coalesces render requests: bursts collapse into one frame.
@@ -445,61 +452,58 @@ func (r *Renderer) drawCover(title string) {
 	drawText(r.canvas, coverX+(coverSize-w)/2, coverY+coverSize/2+26, glyph, face, colorFaint)
 }
 
-// drawInfoColumn draws title / author / chapter in the right column, vertically
-// centered against the cover so the column reads as balanced instead of
-// top-heavy with a blank lower half. The title wraps to 4 lines.
+// drawInfoColumn draws title / author / chapter in the right column, top-aligned
+// so it fills from the top of the screen. The chapter line is the chapter title,
+// or "Chapter N of M" when the book's chapters are unnamed, so the column has
+// content down its length rather than a blank lower half.
 func (r *Renderer) drawInfoColumn(book *library.Audiobook, title string, chapter chapterInfo) {
-	const gapAuthor, gapChapter = 10, 12
-	const top, avail = coverY, progressY - 8 - coverY // vertical room in the column
+	const maxY = progressY - 4
 
 	titleFace := r.fonts.face(r.fontChoice.bold, sizeTitle)
-	titleLines := wrapLines(titleFace, title, textW, 4)
-	tlh := lineHeight(titleFace)
+	tlh := lineHeight(titleFace) - 4 // tighter leading for the title
+	y := coverY + tlh - 1
+	for _, line := range wrapLines(titleFace, title, textW, 4) {
+		drawText(r.canvas, textX, y, line, titleFace, colorText)
+		y += tlh
+	}
 
-	author := ""
-	var authorFace font.Face
 	if book != nil && book.Author != "" {
-		authorFace = r.fonts.face(r.fontChoice.regular, sizeBody)
-		author = ellipsize(authorFace, book.Author, textW)
-	}
-
-	var chapLines []string
-	var chapFace font.Face
-	if chapter.title != "" {
-		chapFace = r.fonts.face(r.fontChoice.regular, sizeChapter)
-		chapLines = wrapLines(chapFace, chapter.title, textW, 2)
-	}
-
-	blockH := len(titleLines) * tlh
-	if author != "" {
-		blockH += gapAuthor + lineHeight(authorFace)
-	}
-	if len(chapLines) > 0 {
-		blockH += gapChapter + len(chapLines)*lineHeight(chapFace)
-	}
-
-	y := top
-	if blockH < avail {
-		y += (avail - blockH) / 2
-	}
-	base := y + tlh - 4
-
-	for _, line := range titleLines {
-		drawText(r.canvas, textX, base, line, titleFace, colorText)
-		base += tlh
-	}
-	if author != "" {
-		base += gapAuthor
-		drawText(r.canvas, textX, base, author, authorFace, colorMuted)
-		base += lineHeight(authorFace)
-	}
-	if len(chapLines) > 0 {
-		base += gapChapter
-		for _, line := range chapLines {
-			drawText(r.canvas, textX, base, line, chapFace, colorAccent)
-			base += lineHeight(chapFace)
+		af := r.fonts.face(r.fontChoice.regular, sizeBody)
+		if y+lineHeight(af) <= maxY {
+			y += 6
+			drawText(r.canvas, textX, y+lineHeight(af)-4, ellipsize(af, book.Author, textW), af, colorMuted)
+			y += lineHeight(af)
 		}
 	}
+
+	sub := r.chapterLabel(book, chapter)
+	if sub != "" {
+		cf := r.fonts.face(r.fontChoice.regular, sizeChapter)
+		y += 8
+		for _, line := range wrapLines(cf, sub, textW, 2) {
+			if y+lineHeight(cf) > maxY {
+				break
+			}
+			drawText(r.canvas, textX, y+lineHeight(cf)-4, line, cf, colorAccent)
+			y += lineHeight(cf)
+		}
+	}
+}
+
+// chapterLabel returns the chapter title, or "Chapter N of M" when the book has
+// chapters but this one is unnamed, or "" when there's nothing to show.
+func (r *Renderer) chapterLabel(book *library.Audiobook, chapter chapterInfo) string {
+	if chapter.title != "" {
+		return chapter.title
+	}
+	if book == nil || len(book.Chapters) == 0 {
+		return ""
+	}
+	idx := library.ChapterIndexAt(book.Chapters, r.playState.Position)
+	if idx < 0 {
+		return ""
+	}
+	return fmt.Sprintf("Chapter %d of %d", idx+1, len(book.Chapters))
 }
 
 // resolveChapter finds the chapter containing the current playback position.
