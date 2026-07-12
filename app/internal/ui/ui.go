@@ -452,41 +452,42 @@ func (r *Renderer) drawCover(title string) {
 	drawText(r.canvas, coverX+(coverSize-w)/2, coverY+coverSize/2+26, glyph, face, colorFaint)
 }
 
-// drawInfoColumn draws title / author / chapter in the right column, top-aligned
-// so it fills from the top of the screen. The chapter line is the chapter title,
-// or "Chapter N of M" when the book's chapters are unnamed, so the column has
-// content down its length rather than a blank lower half.
+// drawInfoColumn draws the right column: the title flows from the top of the
+// screen, while the author and chapter are anchored to the bottom of the cover
+// art. The chapter line is the chapter title, or "Chapter N of M" when the
+// book's chapters are unnamed, and its last line's baseline sits on the cover's
+// bottom edge with the author tucked just above it.
 func (r *Renderer) drawInfoColumn(book *library.Audiobook, title string, chapter chapterInfo) {
-	const maxY = progressY - 4
-
 	titleFace := r.fonts.face(r.fontChoice.bold, sizeTitle)
 	tlh := lineHeight(titleFace) - 4 // tighter leading for the title
 	y := coverY + tlh - 1
-	for _, line := range wrapLines(titleFace, title, textW, 4) {
+	for _, line := range wrapLines(titleFace, title, textW, 5) {
 		drawText(r.canvas, textX, y, line, titleFace, colorText)
 		y += tlh
 	}
 
-	if book != nil && book.Author != "" {
-		af := r.fonts.face(r.fontChoice.regular, sizeBody)
-		if y+lineHeight(af) <= maxY {
-			y += 6
-			drawText(r.canvas, textX, y+lineHeight(af)-4, ellipsize(af, book.Author, textW), af, colorMuted)
-			y += lineHeight(af)
-		}
+	af := r.fonts.face(r.fontChoice.regular, sizeBody)
+	cf := r.fonts.face(r.fontChoice.regular, sizeChapter)
+	clh := lineHeight(cf)
+	coverBottom := coverY + coverSize
+
+	var chapLines []string
+	if sub := r.chapterLabel(book, chapter); sub != "" {
+		chapLines = wrapLines(cf, sub, textW, 2)
 	}
 
-	sub := r.chapterLabel(book, chapter)
-	if sub != "" {
-		cf := r.fonts.face(r.fontChoice.regular, sizeChapter)
-		y += 8
-		for _, line := range wrapLines(cf, sub, textW, 2) {
-			if y+lineHeight(cf) > maxY {
-				break
-			}
-			drawText(r.canvas, textX, y+lineHeight(cf)-4, line, cf, colorAccent)
-			y += lineHeight(cf)
-		}
+	// Baseline of the top chapter line; with a single line this equals the
+	// cover's bottom edge. When there's no chapter, the author sits there itself.
+	topBaseline := coverBottom
+	if n := len(chapLines); n > 0 {
+		topBaseline = coverBottom - (n-1)*clh
+	}
+
+	if book != nil && book.Author != "" {
+		drawText(r.canvas, textX, topBaseline-lineHeight(af), ellipsize(af, book.Author, textW), af, colorMuted)
+	}
+	for i, line := range chapLines {
+		drawText(r.canvas, textX, topBaseline+i*clh, line, cf, colorAccent)
 	}
 }
 
