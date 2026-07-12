@@ -24,10 +24,28 @@ func New(eventBus *bus.Bus) (*InputManager, error) {
 	m := &InputManager{
 		bus: eventBus,
 	}
+	m.setupLED()
 	m.setupButtons()
 	m.setupEncoder()
 
 	return m, nil
+}
+
+// setupLED turns off the Display HAT Mini's RGB status LED. It's common-anode
+// on GPIO 17/27/22, so a channel lights when its pin is low; the pins power up
+// low, which glows the LED white. Driving all three high keeps it dark — the
+// right default for a nightstand. Missing pins are logged and skipped.
+func (m *InputManager) setupLED() {
+	for _, name := range []string{"GPIO17", "GPIO27", "GPIO22"} {
+		pin := gpioreg.ByName(name)
+		if pin == nil {
+			log.Printf("Warning: Failed to find LED pin %s", name)
+			continue
+		}
+		if err := pin.Out(gpio.High); err != nil {
+			log.Printf("Warning: Failed to turn off LED pin %s: %v", name, err)
+		}
+	}
 }
 
 // setupButtons wires the Display HAT Mini buttons. Each watcher blocks on a
