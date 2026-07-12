@@ -44,7 +44,7 @@ const defaultFontID = "plex-serif"
 // Text sizes (px; the face cache renders at DPI 72 so 1pt == 1px). Tuned for the
 // 320x240 panel; adjust here and every screen follows.
 const (
-	sizeTitle   = 18 // smaller so long titles fit the narrow column in more lines
+	sizeTitle   = 18 // small enough that long titles stay complete in 4 wrapped lines
 	sizeChapter = 15
 	sizeBody    = 14
 	sizeSmall   = 12

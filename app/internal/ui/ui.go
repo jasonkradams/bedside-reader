@@ -355,8 +355,10 @@ type chapterInfo struct {
 
 func (r *Renderer) renderPlayer() {
 	book := r.currentBook()
-	chapter := r.resolveChapter(book)
-	title := r.displayTitle(book)
+	r.drawPlayer(book, r.resolveChapter(book), r.displayTitle(book))
+}
+
+func (r *Renderer) drawPlayer(book *library.Audiobook, chapter chapterInfo, title string) {
 	idle := title == idleTitle
 
 	r.ensureCover(book)
@@ -443,36 +445,59 @@ func (r *Renderer) drawCover(title string) {
 	drawText(r.canvas, coverX+(coverSize-w)/2, coverY+coverSize/2+26, glyph, face, colorFaint)
 }
 
-// drawInfoColumn draws title / author / chapter. The title wraps to 4 lines;
-// author and chapter are dropped if they'd overrun the progress bar.
+// drawInfoColumn draws title / author / chapter in the right column, vertically
+// centered against the cover so the column reads as balanced instead of
+// top-heavy with a blank lower half. The title wraps to 4 lines.
 func (r *Renderer) drawInfoColumn(book *library.Audiobook, title string, chapter chapterInfo) {
-	const maxY = progressY - 6
+	const gapAuthor, gapChapter = 10, 12
+	const top, avail = coverY, progressY - 8 - coverY // vertical room in the column
 
 	titleFace := r.fonts.face(r.fontChoice.bold, sizeTitle)
-	y := coverY + lineHeight(titleFace) - 2
-	for _, line := range wrapLines(titleFace, title, textW, 4) {
-		drawText(r.canvas, textX, y, line, titleFace, colorText)
-		y += lineHeight(titleFace)
-	}
+	titleLines := wrapLines(titleFace, title, textW, 4)
+	tlh := lineHeight(titleFace)
 
+	author := ""
+	var authorFace font.Face
 	if book != nil && book.Author != "" {
-		af := r.fonts.face(r.fontChoice.regular, sizeBody)
-		if y+lineHeight(af) <= maxY {
-			y += 4
-			drawText(r.canvas, textX, y+lineHeight(af)-4, ellipsize(af, book.Author, textW), af, colorMuted)
-			y += lineHeight(af)
-		}
+		authorFace = r.fonts.face(r.fontChoice.regular, sizeBody)
+		author = ellipsize(authorFace, book.Author, textW)
 	}
 
+	var chapLines []string
+	var chapFace font.Face
 	if chapter.title != "" {
-		cf := r.fonts.face(r.fontChoice.regular, sizeChapter)
-		y += 8
-		for _, line := range wrapLines(cf, chapter.title, textW, 2) {
-			if y+lineHeight(cf) > maxY {
-				break
-			}
-			drawText(r.canvas, textX, y+lineHeight(cf)-4, line, cf, colorAccent)
-			y += lineHeight(cf)
+		chapFace = r.fonts.face(r.fontChoice.regular, sizeChapter)
+		chapLines = wrapLines(chapFace, chapter.title, textW, 2)
+	}
+
+	blockH := len(titleLines) * tlh
+	if author != "" {
+		blockH += gapAuthor + lineHeight(authorFace)
+	}
+	if len(chapLines) > 0 {
+		blockH += gapChapter + len(chapLines)*lineHeight(chapFace)
+	}
+
+	y := top
+	if blockH < avail {
+		y += (avail - blockH) / 2
+	}
+	base := y + tlh - 4
+
+	for _, line := range titleLines {
+		drawText(r.canvas, textX, base, line, titleFace, colorText)
+		base += tlh
+	}
+	if author != "" {
+		base += gapAuthor
+		drawText(r.canvas, textX, base, author, authorFace, colorMuted)
+		base += lineHeight(authorFace)
+	}
+	if len(chapLines) > 0 {
+		base += gapChapter
+		for _, line := range chapLines {
+			drawText(r.canvas, textX, base, line, chapFace, colorAccent)
+			base += lineHeight(chapFace)
 		}
 	}
 }
