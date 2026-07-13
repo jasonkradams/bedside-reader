@@ -290,15 +290,15 @@ class Builder:
     def _cut_front(self, comp, body):
         lay, p = self.lay, self.p
         scx, scy = lay.screen_center
-        # screen window: active area + 0.6 mm total clearance
-        self._box(comp, scx, scy, 0.0, 40.8 + 0.6, 30.6 + 0.6, p["wall"] + 1.0,
+        # screen window: active area + 0.6 mm total clearance (cz=wall/2 -> cuts THROUGH)
+        self._box(comp, scx, scy, p["wall"] / 2.0, 40.8 + 0.6, 30.6 + 0.6, p["wall"] + 1.0,
                   op=adsk.fusion.FeatureOperations.CutFeatureOperation)
         # button clearance holes through the front wall (the recessed discs float in these)
         for _label, bx, by in lay.buttons:
             self._cyl(comp, bx, by, p["wall"] / 2.0, 2.5, p["wall"] + 1.0,
                       op=adsk.fusion.FeatureOperations.CutFeatureOperation)
-        # rotary-encoder shaft/neck hole (7 mm bushing -> 7.4 mm)
-        self._cyl(comp, p["right_cx"], p["enc_cy"], 0.0, 7.4 / 2, p["wall"] + 1.0,
+        # rotary-encoder shaft/neck hole (7 mm bushing -> 7.4 mm; cuts THROUGH)
+        self._cyl(comp, p["right_cx"], p["enc_cy"], p["wall"] / 2.0, 7.4 / 2, p["wall"] + 1.0,
                   op=adsk.fusion.FeatureOperations.CutFeatureOperation)
         # dotted speaker grille over the cone
         gx, gy, gr = p["right_cx"], p["spk_cy"], p["grille_radius"]
@@ -308,7 +308,7 @@ class Builder:
             for j in range(-n, n + 1):
                 dx, dy = i * step, j * step
                 if dx * dx + dy * dy <= gr * gr:
-                    self._cyl(comp, gx + dx, gy + dy, 0.0, 1.5 / 2, p["wall"] + 1.0,
+                    self._cyl(comp, gx + dx, gy + dy, p["wall"] / 2.0, 1.5 / 2, p["wall"] + 1.0,
                               op=adsk.fusion.FeatureOperations.CutFeatureOperation)
 
     def _usb_port(self, comp, body):
