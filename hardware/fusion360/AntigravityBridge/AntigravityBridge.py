@@ -140,7 +140,26 @@ def run(context):
     try:
         app = adsk.core.Application.get()
         ui  = app.userInterface
-        
+
+        # Guard against a second copy: if a bridge is already answering on 8081,
+        # do not start another one. Two copies would fight over the port and the
+        # shared custom event and leave the bridge in a broken, racy state.
+        import socket
+        _probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _probe.settimeout(0.2)
+        try:
+            _probe.connect(('127.0.0.1', 8081))
+            ui.messageBox('Antigravity Bridge is already running on :8081.\n'
+                          'This second copy was NOT started (avoids a conflict).')
+            return
+        except OSError:
+            pass
+        finally:
+            try:
+                _probe.close()
+            except Exception:
+                pass
+
         try:
             app.unregisterCustomEvent(customEvent)
         except:
