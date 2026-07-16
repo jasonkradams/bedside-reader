@@ -213,6 +213,7 @@ class Builder:
             self._acoustic_box(comp, front)
         if rear is not None:
             self._amp_standoffs(comp, rear)
+            self._charger_standoffs(comp, rear)  # 2 standoffs for the 6106 charger
             self._usbc_port(comp, rear)        # USB-C charger cutout in the RIGHT wall
             self._battery_pocket(comp, rear)   # snug/click battery pocket, no adhesive
         return comp
@@ -457,6 +458,17 @@ class Builder:
             feat = self._cyl(comp, hx, cy, cz, 2.5, 4.0)
             self._combine(rear, [b for b in feat.bodies], adsk.fusion.FeatureOperations.JoinFeatureOperation)
             self._cyl(comp, hx, cy, cz, 1.1, 4.2, op=adsk.fusion.FeatureOperations.CutFeatureOperation)
+
+    def _charger_standoffs(self, comp, rear):
+        """2 standoffs off the rear wall holding the 6106 charger board (estimated holes)."""
+        p = self.p
+        z_wall = p["D"] - p["wall"]
+        height = self.lay.charger_standoff
+        for hx, hy in self.lay.charger_holes:
+            cz = z_wall - height / 2.0           # post: rear inner wall -> `height` toward front
+            feat = self._cyl(comp, hx, hy, cz, 2.5, height)
+            self._combine(rear, [b for b in feat.bodies], adsk.fusion.FeatureOperations.JoinFeatureOperation)
+            self._cyl(comp, hx, hy, cz, 1.1, height + 0.2, op=adsk.fusion.FeatureOperations.CutFeatureOperation)
 
     def _acoustic_box(self, comp, front):
         """front-firing sealed chamber around the speaker + a glued lid."""

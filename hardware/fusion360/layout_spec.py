@@ -312,19 +312,26 @@ def compute(p: Optional[Dict[str, float]] = None) -> Layout:
     # Adafruit 6106: bq25185 USB-C charger + TPS61023 5V boost + power-path, ONE board
     # (~34 x 27 x 8). Rear wall lower-right; USB-C exits the RIGHT wall. No separate
     # boost or fuel gauge -- battery status is read coarsely from the charger pins.
+    # mounted on 2 standoffs, held CHG_STANDOFF mm off the rear wall (board dims and
+    # hole positions are ESTIMATES for the 6106 -- confirm against the physical board).
+    CHG_STANDOFF = 3.0
+    z_board = z_rear - CHG_STANDOFF - 1.6 / 2                 # board centre, off the wall
     chg = Component("Charger_6106", "charger", allow_contact=("wires",),
-                    note="Adafruit 6106 all-in-one (USB-C charge + 5V boost); USB-C exits right wall")
-    chg.parts.append(Part("Chg_pcb", "box", p["charger_cx"], p["charger_cy"], z_rear - 1.6 / 2,
+                    note="Adafruit 6106 all-in-one; on 2 standoffs, USB-C exits the right wall")
+    chg.parts.append(Part("Chg_pcb", "box", p["charger_cx"], p["charger_cy"], z_board,
                           34.0, 27.0, 1.6))
-    chg.parts.append(Part("Chg_parts", "box", p["charger_cx"], p["charger_cy"], z_rear - 1.6 - 6.4 / 2,
-                          34.0, 27.0, 6.4))
+    chg.parts.append(Part("Chg_parts", "box", p["charger_cx"], p["charger_cy"],
+                          z_board - 1.6 / 2 - 6.4 / 2, 34.0, 27.0, 6.4))   # components face into case
     chg_right = p["charger_cx"] + 34.0 / 2.0
-    usbc_z = z_rear - 4.0
+    usbc_z = z_board                                          # connector on the board edge
     # connector sits just BEYOND the board's right edge (no overlap, so it stays one body)
     chg.parts.append(Part("Chg_usbc", "box", chg_right + 2.2, p["charger_cy"], usbc_z,
                           4.0, 9.0, 3.3, role="protrude:usbc"))
     lay.components.append(chg)
     lay.usbc_center = (chg_right, p["charger_cy"], usbc_z)
+    lay.charger_standoff = CHG_STANDOFF
+    lay.charger_holes = [(p["charger_cx"] - 13.0, p["charger_cy"] - 9.0),
+                         (p["charger_cx"] + 13.0, p["charger_cy"] + 9.0)]
 
     # ===== Openings (holes a protruding part may legally pass through) =====
     lay.openings.append(Opening("front_window", "front", screen_cx, screen_cy, 0.0,
